@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "profiles": {
+    "example-profile": {
+      "description": "Example profile — rename and update for your environment.",
+      "remoting": {
+        "useTls": true,
+        "port": 5986,
+        "maxSessionsPerCA": 2
+      },
+      "cas": [
+        {
+          "fqdn": "ca01.corp.local",
+          "displayName": "Issuing CA 01"
+        }
+      ],
+      "certutilView": {
+        "restrict": {
+          "issuedCerts":   "Disposition=20",
+          "revokedCerts":  "Disposition=21",
+          "expiringCerts": "Disposition=20,NotAfter>={EXPIRE_DATE}",
+          "search":        "{DYNAMIC}"
+        },
+        "out": {
+          "issuedCerts":   ["RequestID","RequesterName","CommonName","NotBefore","NotAfter","CertificateTemplate","SerialNumber"],
+          "revokedCerts":  ["RequestID","RequesterName","CommonName","NotBefore","NotAfter","SerialNumber","RevokedReason","RevokedEffectiveWhen"],
+          "expiringCerts": ["RequestID","RequesterName","CommonName","NotAfter","CertificateTemplate","SerialNumber"],
+          "search":        ["RequestID","RequesterName","CommonName","NotBefore","NotAfter","CertificateTemplate","SerialNumber","RevokedReason","RevokedEffectiveWhen"]
+        }
+      }
+    }
+  }
+}
