@@ -1,8 +1,11 @@
 # Posh-Certutil
 
+## Description
 **Version 0.5.5**
 
 A Windows PowerShell module that wraps `certutil.exe` and `certreq.exe` using PowerShell Remoting (WinRM) to execute commands locally on each CA server and aggregate the results as typed PowerShell objects.
+
+(c) 2026 #lucas-cueff.com Distributed under Artistic Licence 2.0 (https://opensource.org/licenses/artistic-license-2.0).
 
 ---
 
