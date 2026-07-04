@@ -9,6 +9,16 @@ A Windows PowerShell module that wraps `certutil.exe` and `certreq.exe` using Po
 
 ---
 
+## install from PowerShell Gallery repository
+You can easily install it from powershell gallery repository
+https://www.powershellgallery.com/packages/POSH-Certutil/
+using a simple powershell command and an internet access :-) 
+```
+	Install-Module -Name POSH-Certutil
+```
+
+---
+
 ## Requirements
 
 - Windows PowerShell 5.1 or PowerShell 7+ on Windows
