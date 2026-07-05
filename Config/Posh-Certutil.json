@@ -18,7 +18,7 @@
         "restrict": {
           "issuedCerts":   "Disposition=20",
           "revokedCerts":  "Disposition=21",
-          "expiringCerts": "Disposition=20,NotAfter>={EXPIRE_DATE}",
+          "expiringCerts": "Disposition=20,NotAfter<={EXPIRE_DATE},NotAfter>={TODAY}",
           "search":        "{DYNAMIC}"
         },
         "out": {
