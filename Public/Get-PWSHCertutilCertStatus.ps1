@@ -10,7 +10,9 @@ function Get-PWSHCertutilCertStatus {
     .PARAMETER InputObject
         A certificate object with Profile, CAServer, and RequestID properties.
     .PARAMETER Profile
-        The configuration profile. Required in the Direct parameter set.
+        The configuration profile. Optional in the Direct parameter set; falls back to the
+        profile marked as default (see Set-PWSHCertutilConfig -DefaultProfile) when omitted.
+        Throws if omitted and no default profile is configured.
     .PARAMETER CAFqdn
         The CA FQDN. Required in the Direct parameter set.
     .PARAMETER RequestID
@@ -33,9 +35,6 @@ function Get-PWSHCertutilCertStatus {
         [object] $InputObject,
 
         [Parameter(Mandatory, ParameterSetName = 'Direct')]
-        [string] $Profile,
-
-        [Parameter(Mandatory, ParameterSetName = 'Direct')]
         [string] $CAFqdn,
 
         [Parameter(Mandatory, ParameterSetName = 'Direct')]
@@ -45,14 +44,21 @@ function Get-PWSHCertutilCertStatus {
         [pscredential] $Credential
     )
 
+    dynamicparam {
+        New-ProfileDynamicParameter -ParameterSetName 'Direct'
+    }
+
     process {
         if ($PSCmdlet.ParameterSetName -eq 'Pipeline') {
             $Profile   = $InputObject.Profile
             $CAFqdn    = $InputObject.CAServer
             $RequestID = $InputObject.RequestID
+        } else {
+            $Profile = $PSBoundParameters['Profile']
         }
 
         $config        = Read-ConfigFile
+        $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
         $autoSyncArgs = @{ Config = $config; ProfileName = $Profile; ProfileConfig = $profileConfig }
@@ -67,7 +73,8 @@ function Get-PWSHCertutilCertStatus {
 
         $sessionArgs = @{ CAFqdn = $CAFqdn; RemotingConfig = $profileConfig.remoting }
         if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
-        $session = Get-CASession @sessionArgs
+        $session   = Get-CASession @sessionArgs
+        $caCulture = Get-CACulture -Session $session
 
         $sb = {
             param($ReqID)
@@ -76,7 +83,7 @@ function Get-PWSHCertutilCertStatus {
             & certutil.exe -view -restrict $restrict -out $out csv 2>$null
         }
         $rawOutput = Invoke-Command -Session $session -ScriptBlock $sb -ArgumentList $RequestID -ErrorAction Stop
-        $csvData   = ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap
+        $csvData   = ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap -CACulture $caCulture
 
         if (-not $csvData) {
             Write-Error "No certificate found with RequestID $RequestID on $CAFqdn"

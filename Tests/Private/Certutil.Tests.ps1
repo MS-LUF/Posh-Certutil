@@ -70,6 +70,88 @@ InModuleScope Posh-Certutil {
             $result = ConvertFrom-CertutilCsv -RawOutput $raw -FieldMap $map
             $result[0].UnmappedColumn | Should -Be 'somevalue'
         }
+
+        It 'Leaves date-shaped columns as strings when -CACulture is not supplied' {
+            $raw = @(
+                '"RequestID","NotBefore","NotAfter"',
+                '"1","1/1/2025 12:00 AM","1/1/2026 12:00 AM"'
+            )
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw
+            $result[0].NotBefore | Should -BeOfType [string]
+            $result[0].NotAfter  | Should -BeOfType [string]
+        }
+
+        It 'Parses NotBefore/NotAfter/RevokedEffectiveWhen into DateTime when -CACulture is supplied' {
+            $raw = @(
+                '"RequestID","NotBefore","NotAfter","RevokedEffectiveWhen"',
+                '"1","1/1/2025 12:00 AM","1/1/2026 12:00 AM","6/1/2025 12:00 AM"'
+            )
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw -CACulture 'en-US'
+            $result[0].NotBefore             | Should -BeOfType [datetime]
+            $result[0].NotAfter              | Should -BeOfType [datetime]
+            $result[0].RevokedEffectiveWhen  | Should -BeOfType [datetime]
+            $result[0].NotBefore             | Should -Be ([datetime]'1/1/2025 12:00 AM')
+        }
+
+        It 'Parses date columns using the supplied CA culture, not the local machine culture' {
+            $raw = @(
+                '"RequestID","NotBefore"',
+                '"1","25/12/2025 00:00:00"'
+            )
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw -CACulture 'fr-FR'
+            $result[0].NotBefore.Day   | Should -Be 25
+            $result[0].NotBefore.Month | Should -Be 12
+        }
+
+        It 'Treats an empty date value as $null rather than throwing' {
+            $raw = @(
+                '"RequestID","RevokedEffectiveWhen"',
+                '"1",""'
+            )
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw -CACulture 'en-US'
+            $result[0].RevokedEffectiveWhen | Should -BeNullOrEmpty
+        }
+
+        It 'Applies date parsing after FieldMap renaming (operates on canonical names)' {
+            $raw = @(
+                '"Issued NotBefore"',
+                '"1/1/2025 12:00 AM"'
+            )
+            $map    = @{ 'Issued NotBefore' = 'NotBefore' }
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw -FieldMap $map -CACulture 'en-US'
+            $result[0].NotBefore | Should -BeOfType [datetime]
+        }
+
+        It 'Warns and leaves the value unchanged when a date string cannot be parsed' {
+            $raw = @(
+                '"RequestID","NotBefore"',
+                '"1","not-a-date"'
+            )
+            $warnings = $null
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw -CACulture 'en-US' -WarningVariable warnings -WarningAction SilentlyContinue
+            $result[0].NotBefore | Should -Be 'not-a-date'
+            $warnings | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Describe 'Get-CACulture' -Tag Unit {
+        BeforeAll {
+            $mockSession = New-MockObject -Type System.Management.Automation.Runspaces.PSSession
+        }
+
+        It 'Returns the culture name from the CA session' {
+            Mock Invoke-Command { 'fr-FR' }
+            $result = Get-CACulture -Session $mockSession
+            $result | Should -Be 'fr-FR'
+        }
+
+        It 'Invokes the remote command against the supplied session' {
+            Mock Invoke-Command { 'en-US' }
+            Get-CACulture -Session $mockSession | Out-Null
+            Should -Invoke Invoke-Command -ParameterFilter {
+                $Session -eq $mockSession
+            } -Times 1
+        }
     }
 
     Describe 'Get-CertutilFieldNameMap' -Tag Unit {

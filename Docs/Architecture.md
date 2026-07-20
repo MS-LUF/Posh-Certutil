@@ -35,16 +35,21 @@ Posh-Certutil/
 ├── Private/
 │   ├── Config/
 │   │   ├── Read-ConfigFile.ps1          # JSON → PSCustomObject (no cache)
+│   │   ├── Resolve-ProfileName.ps1      # -Profile if bound, else the defaultProfile; throws if neither
+│   │   ├── New-ProfileDynamicParameter.ps1 # Builds the dynamic -Profile parameter (ValidateSet from config)
 │   │   ├── Get-ProfileConfig.ps1        # Validate + return one profile
 │   │   ├── Get-CertutilViewParams.ps1   # Resolve restrict + out with substitutions
-│   │   └── Invoke-ProfileAutoSync.ps1   # Auto-sync field name map if syncState absent
+│   │   ├── Invoke-ProfileAutoSync.ps1   # Auto-sync field name map if syncState absent
+│   │   └── ConvertTo-ProfileSyncStateDateTime.ps1 # Parse syncState.lastSync back to [datetime] for output
 │   ├── Session/
 │   │   ├── Get-CASession.ps1            # Pool lookup or new WinRM session
 │   │   ├── Remove-CASession.ps1         # Evict + close one session
 │   │   └── Test-CASession.ps1           # Liveness probe
 │   ├── Certutil/
 │   │   ├── Invoke-CertutilView.ps1      # certutil -view remotely, return stdout lines
-│   │   ├── ConvertFrom-CertutilCsv.ps1  # Filter + ConvertFrom-Csv + localized column rename
+│   │   ├── ConvertFrom-CertutilCsv.ps1  # Filter + ConvertFrom-Csv + localized column rename + CA-culture date parsing
+│   │   ├── Get-CACulture.ps1            # (Get-Culture).Name run on the CA, for ConvertFrom-CertutilCsv -CACulture
+│   │   ├── Get-CALocalDate.ps1          # {Today; ExpireDate} strings in the CA's own locale/timezone
 │   │   ├── Invoke-CertutilRevoke.ps1    # certutil -revoke remotely
 │   │   ├── Invoke-CertutilCrl.ps1       # certutil -crl + download CRL bytes
 │   │   ├── ConvertFrom-CertutilAsn1.ps1 # X509Certificate2 / certutil -dump → PSObject
@@ -67,11 +72,57 @@ Posh-Certutil/
 `Posh-Certutil.psm1` contains zero business logic. It:
 
 1. Declares the module-scoped session pool (`$script:SessionPool` — a `ConcurrentDictionary`).
-2. Dot-sources all `Private/**/*.ps1` files recursively.
-3. Dot-sources all `Public/*.ps1` files and calls `Export-ModuleMember` for each.
-4. Registers an `OnRemove` handler that closes all pooled WinRM sessions when the module is removed.
+2. Declares `$script:CmdletAliases`, a hashtable mapping a handful of canonical (historically
+   plural-noun) function names to a singular-noun alias
+3. Dot-sources all `Private/**/*.ps1` files recursively.
+4. Dot-sources all `Public/*.ps1` files, calls `Export-ModuleMember -Function` for each, and — when
+   the file's `BaseName` is a key in `$script:CmdletAliases` — registers the mapped alias via
+   `New-Alias` and calls `Export-ModuleMember -Alias` for it too.
+5. Registers an `OnRemove` handler that closes all pooled WinRM sessions when the module is removed.
 
 The session pool is `$script:` (module-scoped), not `$global:`. It is invisible to the caller's scope.
+
+Aliases are also listed explicitly in `Posh-Certutil.psd1`'s `AliasesToExport` — both the psm1
+registration and the psd1 list must stay in sync, or `Import-Module` will warn that an exported
+alias isn't declared in the manifest.
+
+---
+
+## The dynamic `-Profile` parameter
+
+Every cmdlet except `Set-PWSHCertutilConfig` declares `-Profile` inside a `dynamicparam {}` block
+instead of the static `param()` block:
+
+```powershell
+dynamicparam {
+    New-ProfileDynamicParameter                       # single-parameter-set cmdlets
+    # or, on pipeline-capable cmdlets with a Direct/Pipeline split:
+    New-ProfileDynamicParameter -ParameterSetName 'Direct'
+}
+
+process {
+    $Profile = $PSBoundParameters['Profile']           # dynamic params are read via $PSBoundParameters,
+    ...                                                 # not the automatic $Profile local (that name
+}                                                       # collides with PowerShell's own $PROFILE variable)
+```
+
+`New-ProfileDynamicParameter` (Private/Config layer) reads `Read-ConfigFile` fresh on every
+invocation and attaches a `ValidateSetAttribute` built from the current profile names — this is
+what gives `-Profile` real tab-completion and makes PowerShell reject an unknown profile name
+before the cmdlet body (or `Resolve-ProfileName`) ever runs. When the config has zero profiles yet,
+`ValidateSet` is omitted so the parameter still accepts any string.
+
+`Set-PWSHCertutilConfig` is the one exception: it keeps `-Profile` as an ordinary static, Mandatory
+parameter with no completion or validation, because its job is to create profiles that don't exist
+yet — restricting it to the existing set would make it impossible to add a new profile.
+
+**Known limitation:** PowerShell does not reliably bind a dynamic parameter positionally once the
+cmdlet also declares other static parameters (reproduced independently of this module — see
+[PowerShell/PowerShell#7265](https://github.com/PowerShell/PowerShell/issues/7265) for the related
+`ArgumentCompleter` scriptblock/module-affinity issue that ruled out the simpler
+`[ArgumentCompleter(...)]` attribute approach for this same problem). Because of this, `-Profile` is
+named-only everywhere it's a dynamic parameter — no example in this repo relies on positional
+`-Profile` invocation.
 
 ---
 
@@ -79,8 +130,9 @@ The session pool is `$script:` (module-scoped), not `$global:`. It is invisible 
 
 ```mermaid
 flowchart TD
-    A[Cmdlet called\n-Profile + filter params] --> B[Read-ConfigFile\nJSON → PSCustomObject\nno cache — reads file every call]
-    B --> C[Get-ProfileConfig\nvalidate profile exists\nreturn profile object]
+    A[Cmdlet called\ndynamicparam resolves -Profile\nvia ValidateSet from config] --> B[Read-ConfigFile\nJSON → PSCustomObject\nno cache — reads file every call]
+    B --> RP[Resolve-ProfileName\n-Profile if bound\nelse profile with defaultProfile=true\nthrows if neither]
+    RP --> C[Get-ProfileConfig\nvalidate profile exists\nreturn profile object]
     C --> AS[Invoke-ProfileAutoSync\nif syncState.lastSync absent:\nprobe CA → build fieldNameMap\nsave to JSON]
     AS --> D{Operation type}
     D -->|get/expiring| E[Get-CertutilViewParams\nresolve restrict + out strings\napply substitutions e.g. EXPIRE_DATE]
@@ -88,8 +140,9 @@ flowchart TD
     E --> G
     F --> G[For each CA in profile]
     G --> H[Get-CASession\npool hit or new WinRM session]
-    H --> I[Invoke-CertutilView\nInvoke-Command on CA\ncertutil -view -restrict R -out O csv]
-    I --> J[ConvertFrom-CertutilCsv\nfilter quoted lines → ConvertFrom-Csv\nrename localized headers → canonical names\nusing syncState.fieldNameMap]
+    H --> GC[Get-CACulture\nGet-Culture .Name on the CA\ne.g. en-US, fr-FR]
+    GC --> I[Invoke-CertutilView\nInvoke-Command on CA\ncertutil -view -restrict R -out O csv]
+    I --> J[ConvertFrom-CertutilCsv\nfilter quoted lines → ConvertFrom-Csv\nrename localized headers → canonical names\nusing syncState.fieldNameMap\nparse NotBefore/NotAfter/RevokedEffectiveWhen\nto DateTime using the CA culture]
     J --> K[Add-ResultMetadata\nstamp Profile + CAServer]
     K --> L[Emit to pipeline]
     L --> G
@@ -137,9 +190,12 @@ Every get/search cmdlet emits objects with this minimum shape:
 | `Profile` | `string` | stamped by `Add-ResultMetadata` |
 | `CAServer` | `string` | stamped by `Add-ResultMetadata` |
 | `RequestID` | `string` | certutil -out field |
+| `NotBefore`, `NotAfter`, `RevokedEffectiveWhen` | `datetime` | certutil -out field, parsed by `ConvertFrom-CertutilCsv -CACulture` (see below) |
 | *(other fields)* | `string` | certutil -out fields per profile config |
 
 Pipeline-aware cmdlets (`Show-`, `Get-CertStatus`, `Revoke-`) extract `Profile`, `CAServer`, and `RequestID` from the piped object automatically. The caller does not re-specify these.
+
+**Date fields are real `[datetime]`, not strings.** certutil writes `NotBefore`/`NotAfter`/`RevokedEffectiveWhen` in the **CA server's** locale format, so `ConvertFrom-CertutilCsv` only parses them into `[datetime]` when the caller passes `-CACulture` (obtained per-CA via `Get-CACulture`) — parsing with the admin machine's own culture instead would silently misread dates on a non-US-locale CA (day/month swapped, etc.), which is exactly the bug this avoids. Empty date strings become `$null`; a value that still fails to parse is left as the original string and a `Write-Warning` is emitted. `Get-PWSHCertutilCertStatus`'s `CRLInfo.RevokedWhen` and `Get-PWSHCertutilConfig`'s `Config.syncState.lastSync` (parsed by `ConvertTo-ProfileSyncStateDateTime`, which needs no CA culture since the module always writes that field in invariant ISO-8601) follow the same rule. Certificate-decoded dates (`Certificate.NotBefore`/`NotAfter` from `ConvertFrom-CertutilAsn1`) and `Publish-PWSHCertutilCACrl`'s `LastWriteTime` were already real `[datetime]` — they come straight off `.NET` objects (`X509Certificate2`, `FileInfo`), never through CSV text.
 
 ### Extended output — `Show-PWSHCertutilCerts` and `Get-PWSHCertutilCertStatus`
 

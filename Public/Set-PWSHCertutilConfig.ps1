@@ -20,12 +20,20 @@ function Set-PWSHCertutilConfig {
         WinRM port. Defaults to 5986 when -UseTls is $true, 5985 otherwise.
     .PARAMETER MaxSessionsPerCA
         Maximum concurrent WinRM sessions per CA server. Default: 2.
+    .PARAMETER DefaultProfile
+        Marks this profile as the default profile used by other cmdlets when -Profile is
+        omitted. Only one profile can be default at a time; setting this to $true clears the
+        flag on any other profile. If omitted while updating an existing profile, the
+        profile's current default status is preserved. Default: $false for new profiles.
     .EXAMPLE
         Set-PWSHCertutilConfig -Profile 'prod-pki' -CAFqdn 'ca01.corp.local','ca02.corp.local' -UseTls $true -Description 'Production PKI'
         Creates the 'prod-pki' profile with two CAs using TLS.
     .EXAMPLE
         Set-PWSHCertutilConfig -Profile 'lab' -CAFqdn 'ca-lab.lab.local' -UseTls $false
         Creates a non-TLS lab profile.
+    .EXAMPLE
+        Set-PWSHCertutilConfig -Profile 'prod-pki' -CAFqdn 'ca01.corp.local' -DefaultProfile $true
+        Marks 'prod-pki' as the default profile so other cmdlets can omit -Profile.
     .OUTPUTS
         PSCustomObject. The saved profile as returned by Get-PWSHCertutilConfig.
     #>
@@ -51,11 +59,28 @@ function Set-PWSHCertutilConfig {
         [int] $Port,
 
         [Parameter()]
-        [int] $MaxSessionsPerCA = 2
+        [int] $MaxSessionsPerCA = 2,
+
+        [Parameter()]
+        [bool] $DefaultProfile
     )
 
     if (-not $PSBoundParameters.ContainsKey('Port')) {
         if ($UseTls) { $Port = 5986 } else { $Port = 5985 }
+    }
+
+    $config          = Read-ConfigFile
+    $existingProfile = $null
+    if ($config.profiles.PSObject.Properties.Name -contains $Profile) {
+        $existingProfile = $config.profiles.$Profile
+    }
+
+    $isDefault = if ($PSBoundParameters.ContainsKey('DefaultProfile')) {
+        $DefaultProfile
+    } elseif ($existingProfile -and $existingProfile.defaultProfile) {
+        $true
+    } else {
+        $false
     }
 
     $cas = for ($i = 0; $i -lt $CAFqdn.Count; $i++) {
@@ -66,14 +91,15 @@ function Set-PWSHCertutilConfig {
     }
 
     $profileEntry = [ordered]@{
-        description  = $Description
-        remoting     = [ordered]@{
+        description    = $Description
+        defaultProfile = $isDefault
+        remoting       = [ordered]@{
             useTls           = $UseTls
             port             = $Port
             maxSessionsPerCA = $MaxSessionsPerCA
         }
-        cas          = @($cas)
-        certutilView = [ordered]@{
+        cas            = @($cas)
+        certutilView   = [ordered]@{
             restrict = [ordered]@{
                 issuedCerts   = 'GeneralFlags=0,Disposition=20'
                 revokedCerts  = 'Disposition=21'
@@ -87,12 +113,18 @@ function Set-PWSHCertutilConfig {
                 search        = @('RequestID','RequesterName','CommonName','NotBefore','NotAfter','CertificateTemplate','SerialNumber','RevokedReason','RevokedEffectiveWhen')
             }
         }
-        syncState    = $null
+        syncState      = $null
     }
 
     if ($PSCmdlet.ShouldProcess($Profile, 'Create or update profile in Posh-Certutil.json')) {
-        $config = Read-ConfigFile
         $config.profiles | Add-Member -MemberType NoteProperty -Name $Profile -Value $profileEntry -Force
+        if ($isDefault) {
+            foreach ($name in $config.profiles.PSObject.Properties.Name) {
+                if ($name -ne $Profile -and $config.profiles.$name.defaultProfile) {
+                    $config.profiles.$name.defaultProfile = $false
+                }
+            }
+        }
         $config | ConvertTo-Json -Depth 10 | Set-Content -Path $script:ConfigPath -Encoding UTF8
         Write-Verbose "Profile '$Profile' written to $script:ConfigPath"
         Get-PWSHCertutilConfig -Profile $Profile

@@ -60,4 +60,31 @@ Describe 'Set-PWSHCertutilConfig' -Tag Unit {
         $result = Set-PWSHCertutilConfig -Profile 'test' -CAFqdn 'ca01.corp.local'
         $result.Profile | Should -Be 'test'
     }
+
+    It 'Defaults defaultProfile to $false for a new profile' {
+        Set-PWSHCertutilConfig -Profile 'test' -CAFqdn 'ca01.corp.local'
+        $saved = Get-Content -Path $tempConfig -Raw | ConvertFrom-Json
+        $saved.profiles.test.defaultProfile | Should -Be $false
+    }
+
+    It 'Sets defaultProfile to $true when -DefaultProfile $true is specified' {
+        Set-PWSHCertutilConfig -Profile 'test' -CAFqdn 'ca01.corp.local' -DefaultProfile $true
+        $saved = Get-Content -Path $tempConfig -Raw | ConvertFrom-Json
+        $saved.profiles.test.defaultProfile | Should -Be $true
+    }
+
+    It 'Clears defaultProfile on other profiles when a new default is set' {
+        Set-PWSHCertutilConfig -Profile 'first'  -CAFqdn 'ca01.corp.local' -DefaultProfile $true
+        Set-PWSHCertutilConfig -Profile 'second' -CAFqdn 'ca02.corp.local' -DefaultProfile $true
+        $saved = Get-Content -Path $tempConfig -Raw | ConvertFrom-Json
+        $saved.profiles.first.defaultProfile  | Should -Be $false
+        $saved.profiles.second.defaultProfile | Should -Be $true
+    }
+
+    It 'Preserves the existing defaultProfile value when updating without -DefaultProfile' {
+        Set-PWSHCertutilConfig -Profile 'test' -CAFqdn 'ca01.corp.local' -DefaultProfile $true
+        Set-PWSHCertutilConfig -Profile 'test' -CAFqdn 'ca02.corp.local'
+        $saved = Get-Content -Path $tempConfig -Raw | ConvertFrom-Json
+        $saved.profiles.test.defaultProfile | Should -Be $true
+    }
 }

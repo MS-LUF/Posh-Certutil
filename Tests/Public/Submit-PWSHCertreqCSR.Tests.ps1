@@ -7,6 +7,7 @@ BeforeAll {
   "profiles": {
     "test-profile": {
       "description": "Test",
+      "defaultProfile": true,
       "remoting": { "useTls": true, "port": 5986, "maxSessionsPerCA": 2 },
       "cas": [{ "fqdn": "ca01.test.local", "displayName": "CA01" }],
       "certutilView": { "restrict": {}, "out": {} }
@@ -104,5 +105,32 @@ Describe 'Submit-PWSHCertreqCSR' -Tag Unit {
         { Submit-PWSHCertreqCSR -Profile 'test-profile' -CAFqdn 'ca01.test.local' `
               -CSRPath $script:FakeCSRPath -CertificateTemplate 'WebServer' -ErrorAction Stop } |
             Should -Throw
+    }
+
+    It 'Falls back to the default profile when -Profile is omitted' {
+        $result = Submit-PWSHCertreqCSR -CAFqdn 'ca01.test.local' `
+                      -CSRPath $script:FakeCSRPath -CertificateTemplate 'WebServer'
+        $result.Profile | Should -Be 'test-profile'
+    }
+
+    It 'Throws when -Profile is omitted and no default profile is configured' {
+        $noDefaultPath = [IO.Path]::GetTempFileName()
+        '{"version":"1.0","profiles":{"other":{"description":"x","defaultProfile":false,"remoting":{"useTls":true,"port":5986,"maxSessionsPerCA":2},"cas":[],"certutilView":{"restrict":{},"out":{}}}}}' |
+            Set-Content -Path $noDefaultPath -Encoding UTF8
+        InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $noDefaultPath } {
+            param($ConfigPath)
+            $script:ConfigPath = $ConfigPath
+        }
+        try {
+            { Submit-PWSHCertreqCSR -CAFqdn 'ca01.test.local' `
+                  -CSRPath $script:FakeCSRPath -CertificateTemplate 'WebServer' -ErrorAction Stop } |
+                Should -Throw -ExpectedMessage '*default profile*'
+        } finally {
+            Remove-Item -Path $noDefaultPath -ErrorAction SilentlyContinue
+            InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $script:TestConfigPath } {
+                param($ConfigPath)
+                $script:ConfigPath = $ConfigPath
+            }
+        }
     }
 }

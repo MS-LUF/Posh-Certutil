@@ -3,6 +3,7 @@
   "profiles": {
     "example-profile": {
       "description": "Example profile — rename and update for your environment.",
+      "defaultProfile": false,
       "remoting": {
         "useTls": true,
         "port": 5986,

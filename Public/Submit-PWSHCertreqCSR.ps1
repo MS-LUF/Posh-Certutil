@@ -12,7 +12,9 @@ function Submit-PWSHCertreqCSR {
         then use Get-PWSHCertreqCert to retrieve the issued certificate. The returned object
         carries Profile, CAServer, and RequestID so it can be piped directly into those cmdlets.
     .PARAMETER Profile
-        The configuration profile to use.
+        The configuration profile to use. Optional; falls back to the profile marked as
+        default (see Set-PWSHCertutilConfig -DefaultProfile) when omitted. Throws if omitted
+        and no default profile is configured.
     .PARAMETER CAFqdn
         The CA to submit the request to. Must be defined in the profile.
     .PARAMETER CSRPath
@@ -49,9 +51,6 @@ function Submit-PWSHCertreqCSR {
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
     param(
-        [Parameter(Mandatory, Position = 0)]
-        [string] $Profile,
-
         [Parameter(Mandatory)]
         [string] $CAFqdn,
 
@@ -74,42 +73,51 @@ function Submit-PWSHCertreqCSR {
         [pscredential] $Credential
     )
 
-    $config        = Read-ConfigFile
-    $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
+    dynamicparam {
+        New-ProfileDynamicParameter
+    }
 
-    $found = $profileConfig.cas | Where-Object { $_.fqdn -eq $CAFqdn }
-    if (-not $found) { throw "CA '$CAFqdn' is not defined in profile '$Profile'." }
+    process {
+        $Profile = $PSBoundParameters['Profile']
 
-    $csrBytes = [IO.File]::ReadAllBytes((Resolve-Path $CSRPath).Path)
+        $config        = Read-ConfigFile
+        $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
+        $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
-    $sessionArgs = @{ CAFqdn = $CAFqdn; RemotingConfig = $profileConfig.remoting }
-    if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
-    $session = Get-CASession @sessionArgs
+        $found = $profileConfig.cas | Where-Object { $_.fqdn -eq $CAFqdn }
+        if (-not $found) { throw "CA '$CAFqdn' is not defined in profile '$Profile'." }
 
-    try {
-        $result = Invoke-CertreqSubmit -Session $session -CSRBytes $csrBytes `
-                      -CertificateTemplate $CertificateTemplate
+        $csrBytes = [IO.File]::ReadAllBytes((Resolve-Path $CSRPath).Path)
 
-        $certificate = $null
-        if ($result.Status -eq 'Issued' -and $result.CertBase64) {
-            $certificate = ConvertFrom-CertutilAsn1 -CertBase64 $result.CertBase64
-            if ($PSBoundParameters.ContainsKey('OutputCertPath')) {
-                [IO.File]::WriteAllBytes($OutputCertPath, [Convert]::FromBase64String($result.CertBase64))
-                Write-Verbose "Certificate saved to $OutputCertPath"
+        $sessionArgs = @{ CAFqdn = $CAFqdn; RemotingConfig = $profileConfig.remoting }
+        if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
+        $session = Get-CASession @sessionArgs
+
+        try {
+            $result = Invoke-CertreqSubmit -Session $session -CSRBytes $csrBytes `
+                          -CertificateTemplate $CertificateTemplate
+
+            $certificate = $null
+            if ($result.Status -eq 'Issued' -and $result.CertBase64) {
+                $certificate = ConvertFrom-CertutilAsn1 -CertBase64 $result.CertBase64
+                if ($PSBoundParameters.ContainsKey('OutputCertPath')) {
+                    [IO.File]::WriteAllBytes($OutputCertPath, [Convert]::FromBase64String($result.CertBase64))
+                    Write-Verbose "Certificate saved to $OutputCertPath"
+                }
             }
-        }
 
-        [PSCustomObject]@{
-            Profile             = $Profile
-            CAServer            = $CAFqdn
-            RequestID           = $result.RequestID
-            Status              = $result.Status
-            CertificateTemplate = $CertificateTemplate
-            CertBase64          = $result.CertBase64
-            Certificate         = $certificate
-            RawOutput           = $result.RawOutput
+            [PSCustomObject]@{
+                Profile             = $Profile
+                CAServer            = $CAFqdn
+                RequestID           = $result.RequestID
+                Status              = $result.Status
+                CertificateTemplate = $CertificateTemplate
+                CertBase64          = $result.CertBase64
+                Certificate         = $certificate
+                RawOutput           = $result.RawOutput
+            }
+        } catch {
+            Write-Error "Failed to submit CSR to '$CAFqdn': $_"
         }
-    } catch {
-        Write-Error "Failed to submit CSR to '$CAFqdn': $_"
     }
 }

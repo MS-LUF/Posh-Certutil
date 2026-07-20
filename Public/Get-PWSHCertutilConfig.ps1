@@ -18,24 +18,28 @@ function Get-PWSHCertutilConfig {
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
-    param(
-        [Parameter(Position = 0)]
-        [string] $Profile
-    )
+    param()
 
-    $config = Read-ConfigFile
+    dynamicparam {
+        New-ProfileDynamicParameter
+    }
 
-    if ($PSBoundParameters.ContainsKey('Profile')) {
-        $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
-        [PSCustomObject]@{
-            Profile = $Profile
-            Config  = $profileConfig
-        }
-    } else {
-        foreach ($name in $config.profiles.PSObject.Properties.Name) {
+    process {
+        $Profile = $PSBoundParameters['Profile']
+        $config  = Read-ConfigFile
+
+        if ($PSBoundParameters.ContainsKey('Profile')) {
+            $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
             [PSCustomObject]@{
-                Profile = $name
-                Config  = $config.profiles.$name
+                Profile = $Profile
+                Config  = ConvertTo-ProfileSyncStateDateTime -ProfileConfig $profileConfig
+            }
+        } else {
+            foreach ($name in $config.profiles.PSObject.Properties.Name) {
+                [PSCustomObject]@{
+                    Profile = $name
+                    Config  = ConvertTo-ProfileSyncStateDateTime -ProfileConfig $config.profiles.$name
+                }
             }
         }
     }

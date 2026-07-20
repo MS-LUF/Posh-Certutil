@@ -165,6 +165,122 @@ InModuleScope Posh-Certutil {
         }
     }
 
+    Describe 'Resolve-ProfileName' -Tag Unit {
+        BeforeAll {
+            $mockConfigWithDefault = [PSCustomObject]@{
+                profiles = [PSCustomObject]@{
+                    'prod-pki' = [PSCustomObject]@{ defaultProfile = $true }
+                    'lab'      = [PSCustomObject]@{ defaultProfile = $false }
+                }
+            }
+            $mockConfigNoDefault = [PSCustomObject]@{
+                profiles = [PSCustomObject]@{
+                    'prod-pki' = [PSCustomObject]@{ defaultProfile = $false }
+                    'lab'      = [PSCustomObject]@{ defaultProfile = $false }
+                }
+            }
+        }
+
+        It 'Returns the given ProfileName unchanged when supplied' {
+            $result = Resolve-ProfileName -Config $mockConfigWithDefault -ProfileName 'lab'
+            $result | Should -Be 'lab'
+        }
+
+        It 'Returns the default profile name when ProfileName is omitted' {
+            $result = Resolve-ProfileName -Config $mockConfigWithDefault
+            $result | Should -Be 'prod-pki'
+        }
+
+        It 'Throws when ProfileName is omitted and no profile is marked default' {
+            { Resolve-ProfileName -Config $mockConfigNoDefault } |
+                Should -Throw -ExpectedMessage '*default profile*'
+        }
+    }
+
+    Describe 'New-ProfileDynamicParameter' -Tag Unit {
+        BeforeEach {
+            $testJson = @'
+{
+  "version": "1.0",
+  "profiles": {
+    "prod-pki": { "description": "Test", "defaultProfile": true, "remoting": {"useTls":true,"port":5986,"maxSessionsPerCA":2}, "cas": [], "certutilView": {"restrict":{},"out":{}} },
+    "lab":      { "description": "Test", "defaultProfile": false, "remoting": {"useTls":true,"port":5986,"maxSessionsPerCA":2}, "cas": [], "certutilView": {"restrict":{},"out":{}} }
+  }
+}
+'@
+            $tempPath = [IO.Path]::GetTempFileName()
+            Set-Content -Path $tempPath -Value $testJson -Encoding UTF8
+            $script:ConfigPath = $tempPath
+        }
+
+        AfterEach {
+            Remove-Item -Path $tempPath -ErrorAction SilentlyContinue
+            $script:ConfigPath = Join-Path $script:ModuleRoot 'Config\Posh-Certutil.json'
+        }
+
+        It 'Returns a RuntimeDefinedParameterDictionary containing a Profile parameter' {
+            $result = New-ProfileDynamicParameter
+            $result | Should -BeOfType [System.Management.Automation.RuntimeDefinedParameterDictionary]
+            $result.ContainsKey('Profile') | Should -Be $true
+            $result['Profile'].ParameterType | Should -Be ([string])
+        }
+
+        It 'Populates ValidateSet with the current profile names' {
+            $result = New-ProfileDynamicParameter
+            $validateSet = $result['Profile'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] }
+            $validateSet.ValidValues | Should -Contain 'prod-pki'
+            $validateSet.ValidValues | Should -Contain 'lab'
+        }
+
+        It 'Omits ValidateSet when no profiles exist' {
+            '{"version":"1.0","profiles":{}}' | Set-Content -Path $tempPath -Encoding UTF8
+            $result = New-ProfileDynamicParameter
+            $validateSet = $result['Profile'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] }
+            $validateSet | Should -BeNullOrEmpty
+        }
+
+        It 'Defaults Mandatory to $false' {
+            $result = New-ProfileDynamicParameter
+            $paramAttr = $result['Profile'].Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] }
+            $paramAttr.Mandatory | Should -Be $false
+        }
+
+        It 'Honors -Mandatory $true' {
+            $result = New-ProfileDynamicParameter -Mandatory $true
+            $paramAttr = $result['Profile'].Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] }
+            $paramAttr.Mandatory | Should -Be $true
+        }
+
+        It 'Sets ParameterSetName when specified' {
+            $result = New-ProfileDynamicParameter -ParameterSetName 'Direct'
+            $paramAttr = $result['Profile'].Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] }
+            $paramAttr.ParameterSetName | Should -Be 'Direct'
+        }
+    }
+
+    Describe 'ConvertTo-ProfileSyncStateDateTime' -Tag Unit {
+        It 'Parses syncState.lastSync from an ISO 8601 string to a DateTime' {
+            $profileConfig = [PSCustomObject]@{
+                syncState = [PSCustomObject]@{ lastSync = '2026-01-01T10:15:00.0000000Z' }
+            }
+            $result = ConvertTo-ProfileSyncStateDateTime -ProfileConfig $profileConfig
+            $result.syncState.lastSync | Should -BeOfType [datetime]
+        }
+
+        It 'Does not error and returns the object unchanged when syncState is absent' {
+            $profileConfig = [PSCustomObject]@{ description = 'no syncState here' }
+            $result = ConvertTo-ProfileSyncStateDateTime -ProfileConfig $profileConfig
+            $result.description | Should -Be 'no syncState here'
+        }
+
+        It 'Does not error when syncState.lastSync is null' {
+            $profileConfig = [PSCustomObject]@{
+                syncState = [PSCustomObject]@{ lastSync = $null; fieldNameMap = $null }
+            }
+            { ConvertTo-ProfileSyncStateDateTime -ProfileConfig $profileConfig } | Should -Not -Throw
+        }
+    }
+
     Describe 'Get-CertutilViewParams' -Tag Unit {
         BeforeAll {
             $mockProfile = [PSCustomObject]@{

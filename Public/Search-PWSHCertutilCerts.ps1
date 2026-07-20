@@ -8,7 +8,9 @@ function Search-PWSHCertutilCerts {
         with OR logic. Results include Profile and CAServer metadata. The out columns come
         from the profile's certutilView.out.search configuration, read at call time.
     .PARAMETER Profile
-        The configuration profile to use.
+        The configuration profile to use. Optional; falls back to the profile marked as
+        default (see Set-PWSHCertutilConfig -DefaultProfile) when omitted. Throws if omitted
+        and no default profile is configured.
     .PARAMETER Type
         Which certificates to search: Issued, Revoked, or All. Default: All.
     .PARAMETER Requester
@@ -42,9 +44,6 @@ function Search-PWSHCertutilCerts {
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
     param(
-        [Parameter(Mandatory, Position = 0)]
-        [string] $Profile,
-
         [Parameter()]
         [ValidateSet('Issued', 'Revoked', 'All')]
         [string] $Type = 'All',
@@ -74,55 +73,65 @@ function Search-PWSHCertutilCerts {
         [pscredential] $Credential
     )
 
-    $config        = Read-ConfigFile
-    $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
-
-    $autoSyncArgs = @{ Config = $config; ProfileName = $Profile; ProfileConfig = $profileConfig }
-    if ($PSBoundParameters.ContainsKey('Credential')) { $autoSyncArgs['Credential'] = $Credential }
-    $profileConfig = Invoke-ProfileAutoSync @autoSyncArgs
-
-    $fieldMap = @{}
-    if ($profileConfig.syncState -and $profileConfig.syncState.fieldNameMap) {
-        $profileConfig.syncState.fieldNameMap.PSObject.Properties |
-            ForEach-Object { $fieldMap[$_.Name] = $_.Value }
+    dynamicparam {
+        New-ProfileDynamicParameter
     }
 
-    $parts = [System.Collections.Generic.List[string]]::new()
-    switch ($Type) {
-        'Issued'  { $parts.Add('Disposition=20') }
-        'Revoked' { $parts.Add('Disposition=21') }
-    }
-    if ($Requester)    { $parts.Add(($Requester    | ForEach-Object { "RequesterName=$_"       }) -join '|') }
-    if ($Subject)      { $parts.Add(($Subject       | ForEach-Object { "CommonName=$_"          }) -join '|') }
-    if ($Template)     { $parts.Add(($Template      | ForEach-Object { "CertificateTemplate=$_" }) -join '|') }
-    if ($SerialNumber) { $parts.Add(($SerialNumber  | ForEach-Object { "SerialNumber=$_"        }) -join '|') }
-    if ($PSBoundParameters.ContainsKey('NotBefore')) {
-        $parts.Add("NotBefore>=$($NotBefore.ToString('MM\/dd\/yyyy'))")
-    }
-    if ($PSBoundParameters.ContainsKey('NotAfter')) {
-        $parts.Add("NotAfter<=$($NotAfter.ToString('MM\/dd\/yyyy'))")
-    }
+    process {
+        $Profile = $PSBoundParameters['Profile']
 
-    $restrict = if ($parts.Count -gt 0) { $parts -join ',' } else { 'GeneralFlags=0' }
-    $out      = ($profileConfig.certutilView.out.search) -join ','
+        $config        = Read-ConfigFile
+        $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
+        $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
-    $cas = if ($PSBoundParameters.ContainsKey('CAFqdn')) {
-        $found = $profileConfig.cas | Where-Object { $_.fqdn -eq $CAFqdn }
-        if (-not $found) { throw "CA '$CAFqdn' is not defined in profile '$Profile'." }
-        $found
-    } else { $profileConfig.cas }
+        $autoSyncArgs = @{ Config = $config; ProfileName = $Profile; ProfileConfig = $profileConfig }
+        if ($PSBoundParameters.ContainsKey('Credential')) { $autoSyncArgs['Credential'] = $Credential }
+        $profileConfig = Invoke-ProfileAutoSync @autoSyncArgs
 
-    foreach ($ca in $cas) {
-        try {
-            $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
-            if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
+        $fieldMap = @{}
+        if ($profileConfig.syncState -and $profileConfig.syncState.fieldNameMap) {
+            $profileConfig.syncState.fieldNameMap.PSObject.Properties |
+                ForEach-Object { $fieldMap[$_.Name] = $_.Value }
+        }
 
-            $session   = Get-CASession @sessionArgs
-            $rawOutput = Invoke-CertutilView -Session $session -Restrict $restrict -Out $out
-            ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap |
-                Add-ResultMetadata -Profile $Profile -CAServer $ca.fqdn
-        } catch {
-            Write-Error "Failed to search certs on '$($ca.fqdn)': $_"
+        $parts = [System.Collections.Generic.List[string]]::new()
+        switch ($Type) {
+            'Issued'  { $parts.Add('Disposition=20') }
+            'Revoked' { $parts.Add('Disposition=21') }
+        }
+        if ($Requester)    { $parts.Add(($Requester    | ForEach-Object { "RequesterName=$_"       }) -join '|') }
+        if ($Subject)      { $parts.Add(($Subject       | ForEach-Object { "CommonName=$_"          }) -join '|') }
+        if ($Template)     { $parts.Add(($Template      | ForEach-Object { "CertificateTemplate=$_" }) -join '|') }
+        if ($SerialNumber) { $parts.Add(($SerialNumber  | ForEach-Object { "SerialNumber=$_"        }) -join '|') }
+        if ($PSBoundParameters.ContainsKey('NotBefore')) {
+            $parts.Add("NotBefore>=$($NotBefore.ToString('MM\/dd\/yyyy'))")
+        }
+        if ($PSBoundParameters.ContainsKey('NotAfter')) {
+            $parts.Add("NotAfter<=$($NotAfter.ToString('MM\/dd\/yyyy'))")
+        }
+
+        $restrict = if ($parts.Count -gt 0) { $parts -join ',' } else { 'GeneralFlags=0' }
+        $out      = ($profileConfig.certutilView.out.search) -join ','
+
+        $cas = if ($PSBoundParameters.ContainsKey('CAFqdn')) {
+            $found = $profileConfig.cas | Where-Object { $_.fqdn -eq $CAFqdn }
+            if (-not $found) { throw "CA '$CAFqdn' is not defined in profile '$Profile'." }
+            $found
+        } else { $profileConfig.cas }
+
+        foreach ($ca in $cas) {
+            try {
+                $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
+                if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
+
+                $session   = Get-CASession @sessionArgs
+                $caCulture = Get-CACulture -Session $session
+                $rawOutput = Invoke-CertutilView -Session $session -Restrict $restrict -Out $out
+                ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap -CACulture $caCulture |
+                    Add-ResultMetadata -Profile $Profile -CAServer $ca.fqdn
+            } catch {
+                Write-Error "Failed to search certs on '$($ca.fqdn)': $_"
+            }
         }
     }
 }

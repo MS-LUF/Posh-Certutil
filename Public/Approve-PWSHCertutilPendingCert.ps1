@@ -16,7 +16,9 @@ function Approve-PWSHCertutilPendingCert {
         A request object with Profile, CAServer, and RequestID properties.
         Accepts output from Submit-PWSHCertreqCSR.
     .PARAMETER Profile
-        The configuration profile. Required in the Direct parameter set.
+        The configuration profile. Optional in the Direct parameter set; falls back to the
+        profile marked as default (see Set-PWSHCertutilConfig -DefaultProfile) when omitted.
+        Throws if omitted and no default profile is configured.
     .PARAMETER CAFqdn
         The CA where the request is pending. Required in the Direct parameter set.
     .PARAMETER RequestID
@@ -44,9 +46,6 @@ function Approve-PWSHCertutilPendingCert {
         [object] $InputObject,
 
         [Parameter(Mandatory, ParameterSetName = 'Direct')]
-        [string] $Profile,
-
-        [Parameter(Mandatory, ParameterSetName = 'Direct')]
         [string] $CAFqdn,
 
         [Parameter(Mandatory, ParameterSetName = 'Direct')]
@@ -56,17 +55,25 @@ function Approve-PWSHCertutilPendingCert {
         [pscredential] $Credential
     )
 
+    dynamicparam {
+        New-ProfileDynamicParameter -ParameterSetName 'Direct'
+    }
+
     process {
         if ($PSCmdlet.ParameterSetName -eq 'Pipeline') {
             $Profile   = $InputObject.Profile
             $CAFqdn    = $InputObject.CAServer
             $RequestID = $InputObject.RequestID
+        } else {
+            $Profile = $PSBoundParameters['Profile']
         }
+
+        $config  = Read-ConfigFile
+        $Profile = Resolve-ProfileName -Config $config -ProfileName $Profile
 
         $target = "RequestID=$RequestID on $CAFqdn (Profile: $Profile)"
         if (-not $PSCmdlet.ShouldProcess($target, 'Approve pending certificate request')) { return }
 
-        $config        = Read-ConfigFile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
         $sessionArgs = @{ CAFqdn = $CAFqdn; RemotingConfig = $profileConfig.remoting }

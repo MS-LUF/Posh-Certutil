@@ -12,6 +12,10 @@ BeforeAll {
       "certutilView": {
         "restrict": { "issuedCerts": "GeneralFlags=0" },
         "out": { "issuedCerts": ["RequestID"] }
+      },
+      "syncState": {
+        "lastSync": "2026-01-01T10:15:00.0000000Z",
+        "fieldNameMap": { "RequestID": "RequestID" }
       }
     },
     "lab": {
@@ -61,6 +65,21 @@ Describe 'Get-PWSHCertutilConfig' -Tag Unit {
         It 'Throws with available profile names in the error' {
             { Get-PWSHCertutilConfig -Profile 'nonexistent' } |
                 Should -Throw -ExpectedMessage '*prod-pki*'
+        }
+    }
+
+    Context 'syncState.lastSync type' {
+        It 'Returns Config.syncState.lastSync as a DateTime, not a string' {
+            $result   = Get-PWSHCertutilConfig -Profile 'prod-pki'
+            $expected = [datetime]::Parse('2026-01-01T10:15:00.0000000Z', `
+                            [System.Globalization.CultureInfo]::InvariantCulture, `
+                            [System.Globalization.DateTimeStyles]::RoundtripKind)
+            $result.Config.syncState.lastSync | Should -BeOfType [datetime]
+            $result.Config.syncState.lastSync | Should -Be $expected
+        }
+
+        It 'Does not error for a profile with no syncState' {
+            { Get-PWSHCertutilConfig -Profile 'lab' } | Should -Not -Throw
         }
     }
 }

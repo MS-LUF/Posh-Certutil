@@ -35,6 +35,8 @@ Invoke-Pester -Path .\Tests
 | Valid -Profile | Returns the matching profile only | Unit |
 | Invalid -Profile | Throws with profile list in message | Unit |
 | Empty config file | Returns empty result without error | Unit |
+| syncState.lastSync present | Returned as DateTime, not string | Unit |
+| syncState absent | No error | Unit |
 
 ### `Set-PWSHCertutilConfig`
 
@@ -46,6 +48,10 @@ Invoke-Pester -Path .\Tests
 | Multiple CAFqdns | All CAs written to cas array | Unit |
 | -WhatIf | Does not write to disk | Unit |
 | Custom port | Port persisted correctly | Unit |
+| New profile, no -DefaultProfile | defaultProfile defaults to $false | Unit |
+| -DefaultProfile $true | defaultProfile written as $true | Unit |
+| -DefaultProfile $true on a second profile | Clears defaultProfile on every other profile | Unit |
+| Update without -DefaultProfile | Preserves the profile's existing defaultProfile value | Unit |
 
 ### `Get-PWSHCertutilIssuedCerts`
 
@@ -58,11 +64,17 @@ Invoke-Pester -Path .\Tests
 | certutil returns rows | Returns objects with Profile+CAServer | Unit |
 | One CA fails | Writes error, continues to next CA | Unit |
 | FieldMap rename | Returns objects with canonical property names | Unit |
+| -Profile omitted | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
+| -Profile tab completion | TabExpansion2 suggests configured profile names | Unit |
+| -Profile invalid value | Rejected by ValidateSet before cmdlet body runs | Unit |
+| NotBefore/NotAfter present | Returned as DateTime (via Get-CACulture), not string | Unit |
 | Real CA query | Returns real issued certs | Integration |
 
 ### `Get-PWSHCertutilRevokedCerts`
 
-Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operation key.
+Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operation key, plus the same
+-Profile default-fallback and no-default-throws coverage.
 
 ### `Get-PWSHCertutilShortTermExpiringCerts`
 
@@ -72,6 +84,8 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | Restrict substitution | Both CA-side Today and ExpireDate appear in restrict | Unit |
 | -Days 90 | Get-CALocalDate called with Days=90 | Unit |
 | Invalid -Days value | Parameter validation rejects it | Unit |
+| -Profile omitted | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
 
 ### `Search-PWSHCertutilCerts`
 
@@ -84,6 +98,8 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | Multiple -Requester | Values joined with pipe (OR) | Unit |
 | Multiple filter types | restrict contains all parts joined with comma | Unit |
 | -NotBefore / -NotAfter | Correct MM/dd/yyyy format in restrict | Unit |
+| -Profile omitted | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
 
 ### `Show-PWSHCertutilCerts`
 
@@ -93,6 +109,8 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | Direct parameters | Uses explicit parameters | Unit |
 | RequestID not found | Write-Error, no output | Unit |
 | Valid certificate bytes | Returns decoded ASN.1 object | Unit |
+| -Profile omitted (Direct set) | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
 | Real cert decode | Subject/Issuer populated correctly | Integration |
 
 ### `Get-PWSHCertutilCertStatus`
@@ -103,6 +121,9 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | Disposition=20 | Status = 'Issued' | Unit |
 | Disposition=21 | Status = 'Revoked', CRLInfo populated | Unit |
 | Unknown disposition | Status contains raw value | Unit |
+| -Profile omitted (Direct set) | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
+| Disposition=21 | CRLInfo.RevokedWhen returned as DateTime, not string | Unit |
 
 ### `Revoke-PWSHCertutilIssuedCerts`
 
@@ -114,6 +135,10 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | -WhatIf | Does not call Invoke-CertutilRevoke | Unit |
 | Pipeline input | Extracts Profile/CAServer/SerialNumber | Unit |
 | certutil returns FAILED | Write-Error emitted | Unit |
+| -Profile omitted (Direct set) | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
+| -Profile tab completion (Direct set) | TabExpansion2 suggests configured profile names | Unit |
+| -Profile invalid value (Direct set) | Rejected by ValidateSet before cmdlet body runs | Unit |
 | Real revocation | Certificate status changes to Revoked | Integration |
 
 ### `Publish-PWSHCertutilCACrl`
@@ -124,6 +149,8 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | -CAFqdn filter | Called once only | Unit |
 | -WhatIf | Does not call Invoke-CertutilCrl | Unit |
 | CRL decode | CRLDecoded property populated | Unit |
+| -Profile omitted | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
 | Real publish | LastWriteTime is recent | Integration |
 
 ### `Sync-PWSHCertutilCASchema`
@@ -150,6 +177,8 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | -WhatIf | Set-Content not called | Unit |
 | Written JSON content | Invalid field removed, valid field preserved | Unit |
 | syncState updated | lastSync and fieldNameMap written when -UpdateConfig + probe succeeds | Unit |
+| -Profile omitted | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
 | Real schema discovery | Returns real column names from CA | Integration |
 | Real mismatch | Warning emitted when CA versions differ | Integration |
 
@@ -164,6 +193,8 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | Status=Pending | RequestID and Status=Pending returned on output object | Unit |
 | CA not in profile | Throws | Unit |
 | Invoke-CertreqSubmit throws | Write-Error emitted | Unit |
+| -Profile omitted | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
 | Real submission (auto-issue) | Certificate returned, Status=Issued | Integration |
 | Real submission (manual) | Status=Pending, RequestID populated | Integration |
 
@@ -177,6 +208,8 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | Pipeline input | Extracts Profile/CAServer/RequestID from piped object | Unit |
 | Status=Pending | ConvertFrom-CertutilAsn1 not called; Certificate is null | Unit |
 | Invoke-CertreqRetrieve throws | Write-Error emitted | Unit |
+| -Profile omitted (Direct set) | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
 | Real retrieve after approval | Certificate returned with correct Subject | Integration |
 
 ### `Approve-PWSHCertutilPendingCert`
@@ -188,7 +221,24 @@ Same structure as `Get-PWSHCertutilIssuedCerts` — uses `revokedCerts` operatio
 | Pipeline input | Extracts Profile/CAServer/RequestID from piped object | Unit |
 | Success | Returns object with Success=$true | Unit |
 | Invoke-CertutilResubmit throws | Write-Error emitted | Unit |
+| -Profile omitted (Direct set) | Falls back to the default profile | Unit |
+| -Profile omitted, no default configured | Throws | Unit |
 | Real approval | Pending request transitions to Issued on CA | Integration |
+
+### Cmdlet aliases (`Tests\Public\Aliases.Tests.ps1`)
+
+Singular-noun aliases registered in `Posh-Certutil.psm1` for the six cmdlets whose noun predates
+the singular-noun guideline.
+
+| Context | Test | Tag |
+|---|---|---|
+| `Get-PWSHCertutilIssuedCert` | Resolves to `Get-PWSHCertutilIssuedCerts` | Unit |
+| `Get-PWSHCertutilRevokedCert` | Resolves to `Get-PWSHCertutilRevokedCerts` | Unit |
+| `Get-PWSHCertutilShortTermExpiringCert` | Resolves to `Get-PWSHCertutilShortTermExpiringCerts` | Unit |
+| `Revoke-PWSHCertutilIssuedCert` | Resolves to `Revoke-PWSHCertutilIssuedCerts` | Unit |
+| `Search-PWSHCertutilCert` | Resolves to `Search-PWSHCertutilCerts` | Unit |
+| `Show-PWSHCertutilCert` | Resolves to `Show-PWSHCertutilCerts` | Unit |
+| Exported alias set | Matches the expected six names exactly (no more, no fewer) | Unit |
 
 ---
 
@@ -202,6 +252,14 @@ Tested via `InModuleScope 'Posh-Certutil'`.
 |---|---|---|
 | `Read-ConfigFile` | File exists — returns PSCustomObject | Unit |
 | `Read-ConfigFile` | File missing — returns empty profiles object | Unit |
+| `Resolve-ProfileName` | ProfileName supplied — returned unchanged | Unit |
+| `Resolve-ProfileName` | ProfileName omitted — returns the profile with defaultProfile=true | Unit |
+| `Resolve-ProfileName` | ProfileName omitted, no profile marked default — throws | Unit |
+| `New-ProfileDynamicParameter` | Returns a RuntimeDefinedParameterDictionary with a Profile parameter | Unit |
+| `New-ProfileDynamicParameter` | ValidateSet populated with current profile names | Unit |
+| `New-ProfileDynamicParameter` | ValidateSet omitted when no profiles exist | Unit |
+| `New-ProfileDynamicParameter` | Mandatory defaults to $false; honors -Mandatory $true | Unit |
+| `New-ProfileDynamicParameter` | ParameterSetName applied when specified | Unit |
 | `Get-ProfileConfig` | Valid profile — returns profile object | Unit |
 | `Get-ProfileConfig` | Invalid profile — throws with available list | Unit |
 | `Get-CertutilViewParams` | issuedCerts operation — returns restrict + out | Unit |
@@ -210,6 +268,9 @@ Tested via `InModuleScope 'Posh-Certutil'`.
 | `Invoke-ProfileAutoSync` | Already synced — returns profileConfig unchanged | Unit |
 | `Invoke-ProfileAutoSync` | Not synced — emits warning, calls Get-CertutilFieldNameMap | Unit |
 | `Invoke-ProfileAutoSync` | Probe fails — emits warning, returns profileConfig unchanged | Unit |
+| `ConvertTo-ProfileSyncStateDateTime` | ISO 8601 lastSync string — parsed to DateTime | Unit |
+| `ConvertTo-ProfileSyncStateDateTime` | syncState absent — returns object unchanged, no error | Unit |
+| `ConvertTo-ProfileSyncStateDateTime` | syncState.lastSync null — no error | Unit |
 
 ### Session layer (`Tests\Private\Session.Tests.ps1`)
 
@@ -235,9 +296,17 @@ Tested via `InModuleScope 'Posh-Certutil'`.
 | `ConvertFrom-CertutilCsv` | Empty input — returns empty | Unit |
 | `ConvertFrom-CertutilCsv` | FieldMap provided — renames localized headers to canonical names | Unit |
 | `ConvertFrom-CertutilCsv` | Unmapped columns passed through unchanged | Unit |
+| `ConvertFrom-CertutilCsv` | -CACulture not supplied — date-shaped columns stay strings (unchanged) | Unit |
+| `ConvertFrom-CertutilCsv` | -CACulture supplied — NotBefore/NotAfter/RevokedEffectiveWhen parsed to DateTime | Unit |
+| `ConvertFrom-CertutilCsv` | Non-US CACulture (fr-FR, day-first) — parses day/month correctly, not swapped | Unit |
+| `ConvertFrom-CertutilCsv` | Empty date value — becomes $null, not an exception | Unit |
+| `ConvertFrom-CertutilCsv` | Date parsing applied after FieldMap rename (operates on canonical names) | Unit |
+| `ConvertFrom-CertutilCsv` | Unparseable date string — Write-Warning emitted, original string preserved | Unit |
 | `Get-CertutilFieldNameMap` | Success — returns localized→canonical hashtable | Unit |
 | `Get-CertutilFieldNameMap` | CA returns no CSV header — throws | Unit |
 | `Get-CertutilFieldNameMap` | Column count mismatch — throws | Unit |
+| `Get-CACulture` | Returns the culture name from the CA session | Unit |
+| `Get-CACulture` | Invokes the remote command against the supplied session | Unit |
 | `Get-CALocalDate` | Returns Today and ExpireDate from CA | Unit |
 | `Get-CALocalDate` | Passes Days argument to remote scriptblock | Unit |
 | `Invoke-CertutilView` | Certutil succeeds — returns stdout lines | Unit |

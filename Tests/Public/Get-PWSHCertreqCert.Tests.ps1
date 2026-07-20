@@ -7,6 +7,7 @@ BeforeAll {
   "profiles": {
     "test-profile": {
       "description": "Test",
+      "defaultProfile": true,
       "remoting": { "useTls": true, "port": 5986, "maxSessionsPerCA": 2 },
       "cas": [{ "fqdn": "ca01.test.local", "displayName": "CA01" }],
       "certutilView": { "restrict": {}, "out": {} }
@@ -97,5 +98,30 @@ Describe 'Get-PWSHCertreqCert' -Tag Unit {
         Mock -ModuleName Posh-Certutil Invoke-CertreqRetrieve { throw 'certreq retrieve failed' }
         { Get-PWSHCertreqCert -Profile 'test-profile' -CAFqdn 'ca01.test.local' -RequestID '42' `
               -ErrorAction Stop } | Should -Throw
+    }
+
+    It 'Falls back to the default profile when -Profile is omitted' {
+        $result = Get-PWSHCertreqCert -CAFqdn 'ca01.test.local' -RequestID '42'
+        $result.Profile | Should -Be 'test-profile'
+    }
+
+    It 'Throws when -Profile is omitted and no default profile is configured' {
+        $noDefaultPath = [IO.Path]::GetTempFileName()
+        '{"version":"1.0","profiles":{"other":{"description":"x","defaultProfile":false,"remoting":{"useTls":true,"port":5986,"maxSessionsPerCA":2},"cas":[],"certutilView":{"restrict":{},"out":{}}}}}' |
+            Set-Content -Path $noDefaultPath -Encoding UTF8
+        InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $noDefaultPath } {
+            param($ConfigPath)
+            $script:ConfigPath = $ConfigPath
+        }
+        try {
+            { Get-PWSHCertreqCert -CAFqdn 'ca01.test.local' -RequestID '42' -ErrorAction Stop } |
+                Should -Throw -ExpectedMessage '*default profile*'
+        } finally {
+            Remove-Item -Path $noDefaultPath -ErrorAction SilentlyContinue
+            InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $script:TestConfigPath } {
+                param($ConfigPath)
+                $script:ConfigPath = $ConfigPath
+            }
+        }
     }
 }

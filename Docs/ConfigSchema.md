@@ -31,11 +31,16 @@ The path is set in `Posh-Certutil.psm1` as `$script:ConfigPath` and is read on e
 ```json
 {
   "description": "Human-readable label",
+  "defaultProfile": false,
   "remoting": { ... },
   "cas": [ ... ],
   "certutilView": { ... }
 }
 ```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `defaultProfile` | bool | `false` | When `true`, this profile is used by every cmdlet's `-Profile` parameter when it is omitted. Only one profile should be `true` at a time — `Set-PWSHCertutilConfig -DefaultProfile $true` enforces this by clearing the flag on every other profile. If no profile has `defaultProfile: true`, cmdlets throw when called without `-Profile`. |
 
 ### `remoting`
 
@@ -121,12 +126,14 @@ Populated automatically by `Sync-PWSHCertutilCASchema -UpdateConfig` or by the f
 
 | Field | Type | Description |
 |---|---|---|
-| `lastSync` | ISO 8601 string | Timestamp of the last successful sync. If absent or `null`, auto-sync triggers on the next query. |
+| `lastSync` | ISO 8601 string on disk | Timestamp of the last successful sync, written as an invariant-culture `[datetime]::UtcNow.ToString('o')` string. If absent or `null`, auto-sync triggers on the next query. `Get-PWSHCertutilConfig` returns it as a real `[datetime]` (via `ConvertTo-ProfileSyncStateDateTime`) — the string form only exists in the JSON file itself. |
 | `fieldNameMap` | object | Maps each localized CSV column header (as returned by certutil) to its canonical internal field name. Used by `ConvertFrom-CertutilCsv` to rename columns so pipeline-chaining between cmdlets works regardless of the CA server locale. |
 
 **Why this exists:** `certutil -view csv` outputs localized column headers (e.g. `"Issued Request ID"` on English, different strings on French, German, etc.). Without the map the output objects have locale-specific property names, which breaks cmdlets that read `$InputObject.RequestID`.
 
 **Auto-sync behaviour:** When a query cmdlet runs and `syncState.lastSync` is absent or `null`, the module automatically opens a session to the first CA in the profile, runs a probe query (`certutil -view -restrict RequestID=0 csv`) to discover the localized headers, builds the map, and saves it to the JSON. A `Write-Warning` is emitted to make the side-effect visible. The first query takes slightly longer; all subsequent queries use the cached map.
+
+**Date-typed output columns:** The same localized-header problem applies to certutil's date/time columns (`NotBefore`, `NotAfter`, `RevokedEffectiveWhen`) — certutil writes them in the **CA server's** locale, not the admin machine's. `ConvertFrom-CertutilCsv` parses these into real `[datetime]` values using a culture name fetched per-CA via the `Get-CACulture` private helper (`(Get-Culture).Name` run on the CA itself), never the admin machine's own culture. See [Docs/Architecture.md](Architecture.md#output-object-contract) for the full contract.
 
 ---
 
@@ -153,3 +160,25 @@ Set-PWSHCertutilConfig -Profile 'prod-pki' `
     -DisplayName 'Root CA','Issuing CA' `
     -UseTls $true -Description 'Production PKI'
 ```
+
+### Default profile
+
+Mark a profile as the default so every cmdlet's `-Profile` parameter can be omitted:
+
+```powershell
+Set-PWSHCertutilConfig -Profile 'prod-pki' -CAFqdn 'ca01.corp.local' -DefaultProfile $true
+```
+
+`Resolve-ProfileName` (private helper) resolves `-Profile` on every cmdlet call: if `-Profile` is bound it is used as-is; otherwise the profile with `defaultProfile: true` is used; if no such profile exists, the cmdlet throws.
+
+### Tab completion and validation on -Profile
+
+On every cmdlet except `Set-PWSHCertutilConfig`, `-Profile` is a dynamic parameter (see
+[Docs/Architecture.md](Architecture.md#the-dynamic--profile-parameter)) with a `ValidateSet` built
+from the current profile names in this JSON file. That means:
+
+- Pressing Tab after `-Profile ` on any of those cmdlets suggests only the profiles currently defined here.
+- Supplying a name that isn't in `profiles` fails PowerShell parameter binding immediately, before the cmdlet runs.
+- The list is read fresh from disk on every call — add, rename, or remove a profile here and the next Tab-completion/validation reflects it with no module reload.
+
+`Set-PWSHCertutilConfig` deliberately keeps `-Profile` unrestricted since its purpose is to create profiles that don't exist yet.

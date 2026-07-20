@@ -1,5 +1,5 @@
 @{
-    ModuleVersion     = '0.5.5'
+    ModuleVersion     = '0.5.9'
     GUID              = 'c3d4e5f6-a1b2-4321-8765-0987654321ab'
     Author            = 'Lucas CUEFF'
     CompanyName       = 'Lucas-Cueff.com'
@@ -25,7 +25,14 @@
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
-    AliasesToExport   = @()
+    AliasesToExport   = @(
+        'Get-PWSHCertutilIssuedCert'
+        'Get-PWSHCertutilRevokedCert'
+        'Get-PWSHCertutilShortTermExpiringCert'
+        'Revoke-PWSHCertutilIssuedCert'
+        'Search-PWSHCertutilCert'
+        'Show-PWSHCertutilCert'
+    )
     PrivateData       = @{
         PSData = @{
             Tags       = @('PKI', 'ADCS', 'Certificate', 'CA', 'Certutil', 'Windows')

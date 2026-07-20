@@ -8,7 +8,9 @@ function Publish-PWSHCertutilCACrl {
         PowerShell object containing the raw CRL (Base64), publish output, and ASN.1-decoded
         CRL content via certutil -dump. Supports -WhatIf.
     .PARAMETER Profile
-        The configuration profile to use.
+        The configuration profile to use. Optional; falls back to the profile marked as
+        default (see Set-PWSHCertutilConfig -DefaultProfile) when omitted. Throws if omitted
+        and no default profile is configured.
     .PARAMETER CAFqdn
         Optional. Publishes on this CA only instead of all CAs in the profile.
     .PARAMETER Credential
@@ -28,9 +30,6 @@ function Publish-PWSHCertutilCACrl {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     [OutputType([PSCustomObject])]
     param(
-        [Parameter(Mandatory, Position = 0)]
-        [string] $Profile,
-
         [Parameter()]
         [string] $CAFqdn,
 
@@ -38,36 +37,45 @@ function Publish-PWSHCertutilCACrl {
         [pscredential] $Credential
     )
 
-    $config        = Read-ConfigFile
-    $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
+    dynamicparam {
+        New-ProfileDynamicParameter
+    }
 
-    $cas = if ($PSBoundParameters.ContainsKey('CAFqdn')) {
-        $found = $profileConfig.cas | Where-Object { $_.fqdn -eq $CAFqdn }
-        if (-not $found) { throw "CA '$CAFqdn' is not defined in profile '$Profile'." }
-        $found
-    } else { $profileConfig.cas }
+    process {
+        $Profile = $PSBoundParameters['Profile']
 
-    foreach ($ca in $cas) {
-        if (-not $PSCmdlet.ShouldProcess($ca.fqdn, 'Publish CRL')) { continue }
-        try {
-            $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
-            if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
-            $session = Get-CASession @sessionArgs
+        $config        = Read-ConfigFile
+        $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
+        $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
-            $crlResult  = Invoke-CertutilCrl -Session $session
-            $crlDecoded = ConvertFrom-CertutilAsn1 -CrlBase64 $crlResult.CrlBase64
+        $cas = if ($PSBoundParameters.ContainsKey('CAFqdn')) {
+            $found = $profileConfig.cas | Where-Object { $_.fqdn -eq $CAFqdn }
+            if (-not $found) { throw "CA '$CAFqdn' is not defined in profile '$Profile'." }
+            $found
+        } else { $profileConfig.cas }
 
-            [PSCustomObject]@{
-                Profile       = $Profile
-                CAServer      = $ca.fqdn
-                FileName      = $crlResult.FileName
-                LastWriteTime = $crlResult.LastWriteTime
-                PublishOutput = $crlResult.PublishOutput
-                CrlBase64     = $crlResult.CrlBase64
-                CRLDecoded    = $crlDecoded
+        foreach ($ca in $cas) {
+            if (-not $PSCmdlet.ShouldProcess($ca.fqdn, 'Publish CRL')) { continue }
+            try {
+                $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
+                if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
+                $session = Get-CASession @sessionArgs
+
+                $crlResult  = Invoke-CertutilCrl -Session $session
+                $crlDecoded = ConvertFrom-CertutilAsn1 -CrlBase64 $crlResult.CrlBase64
+
+                [PSCustomObject]@{
+                    Profile       = $Profile
+                    CAServer      = $ca.fqdn
+                    FileName      = $crlResult.FileName
+                    LastWriteTime = $crlResult.LastWriteTime
+                    PublishOutput = $crlResult.PublishOutput
+                    CrlBase64     = $crlResult.CrlBase64
+                    CRLDecoded    = $crlDecoded
+                }
+            } catch {
+                Write-Error "Failed to publish CRL on '$($ca.fqdn)': $_"
             }
-        } catch {
-            Write-Error "Failed to publish CRL on '$($ca.fqdn)': $_"
         }
     }
 }

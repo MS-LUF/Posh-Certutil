@@ -7,6 +7,7 @@ BeforeAll {
   "profiles": {
     "test-profile": {
       "description": "Test",
+      "defaultProfile": true,
       "remoting": { "useTls": true, "port": 5986, "maxSessionsPerCA": 2 },
       "cas": [{ "fqdn": "ca01.test.local", "displayName": "CA01" }],
       "certutilView": {
@@ -44,6 +45,7 @@ AfterAll {
 Describe 'Search-PWSHCertutilCerts' -Tag Unit {
     BeforeEach {
         Mock -ModuleName Posh-Certutil Get-CASession      { $fakeSession }
+        Mock -ModuleName Posh-Certutil Get-CACulture      { 'en-US' }
         Mock -ModuleName Posh-Certutil Invoke-CertutilView { $emptyCsv }
     }
 
@@ -82,5 +84,29 @@ Describe 'Search-PWSHCertutilCerts' -Tag Unit {
         Search-PWSHCertutilCerts -Profile 'test-profile' -NotAfter $date | Out-Null
         Should -Invoke -ModuleName Posh-Certutil Invoke-CertutilView `
             -ParameterFilter { $Restrict -like '*NotAfter<=12/31/2025*' } -Times 1
+    }
+
+    It 'Falls back to the default profile when -Profile is omitted' {
+        Search-PWSHCertutilCerts | Out-Null
+        Should -Invoke -ModuleName Posh-Certutil Get-CASession -Times 1
+    }
+
+    It 'Throws when -Profile is omitted and no default profile is configured' {
+        $noDefaultPath = [IO.Path]::GetTempFileName()
+        '{"version":"1.0","profiles":{"other":{"description":"x","defaultProfile":false,"remoting":{"useTls":true,"port":5986,"maxSessionsPerCA":2},"cas":[],"certutilView":{"restrict":{},"out":{}}}}}' |
+            Set-Content -Path $noDefaultPath -Encoding UTF8
+        InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $noDefaultPath } {
+            param($ConfigPath)
+            $script:ConfigPath = $ConfigPath
+        }
+        try {
+            { Search-PWSHCertutilCerts } | Should -Throw -ExpectedMessage '*default profile*'
+        } finally {
+            Remove-Item -Path $noDefaultPath -ErrorAction SilentlyContinue
+            InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $script:TestConfigPath } {
+                param($ConfigPath)
+                $script:ConfigPath = $ConfigPath
+            }
+        }
     }
 }

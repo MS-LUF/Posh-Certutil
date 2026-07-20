@@ -8,7 +8,9 @@ function Get-PWSHCertutilIssuedCerts {
         values are read dynamically from the profile configuration. Each object includes
         Profile and CAServer properties identifying its source.
     .PARAMETER Profile
-        The configuration profile to use.
+        The configuration profile to use. Optional; falls back to the profile marked as
+        default (see Set-PWSHCertutilConfig -DefaultProfile) when omitted. Throws if omitted
+        and no default profile is configured.
     .PARAMETER CAFqdn
         Optional. Queries only this CA instead of all CAs in the profile.
     .PARAMETER Credential
@@ -28,9 +30,6 @@ function Get-PWSHCertutilIssuedCerts {
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
     param(
-        [Parameter(Mandatory, Position = 0)]
-        [string] $Profile,
-
         [Parameter()]
         [string] $CAFqdn,
 
@@ -38,38 +37,48 @@ function Get-PWSHCertutilIssuedCerts {
         [pscredential] $Credential
     )
 
-    $config        = Read-ConfigFile
-    $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
-
-    $autoSyncArgs = @{ Config = $config; ProfileName = $Profile; ProfileConfig = $profileConfig }
-    if ($PSBoundParameters.ContainsKey('Credential')) { $autoSyncArgs['Credential'] = $Credential }
-    $profileConfig = Invoke-ProfileAutoSync @autoSyncArgs
-
-    $fieldMap = @{}
-    if ($profileConfig.syncState -and $profileConfig.syncState.fieldNameMap) {
-        $profileConfig.syncState.fieldNameMap.PSObject.Properties |
-            ForEach-Object { $fieldMap[$_.Name] = $_.Value }
+    dynamicparam {
+        New-ProfileDynamicParameter
     }
 
-    $viewParams = Get-CertutilViewParams -ProfileConfig $profileConfig -Operation 'issuedCerts'
+    process {
+        $Profile = $PSBoundParameters['Profile']
 
-    $cas = if ($PSBoundParameters.ContainsKey('CAFqdn')) {
-        $found = $profileConfig.cas | Where-Object { $_.fqdn -eq $CAFqdn }
-        if (-not $found) { throw "CA '$CAFqdn' is not defined in profile '$Profile'." }
-        $found
-    } else { $profileConfig.cas }
+        $config        = Read-ConfigFile
+        $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
+        $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
-    foreach ($ca in $cas) {
-        try {
-            $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
-            if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
+        $autoSyncArgs = @{ Config = $config; ProfileName = $Profile; ProfileConfig = $profileConfig }
+        if ($PSBoundParameters.ContainsKey('Credential')) { $autoSyncArgs['Credential'] = $Credential }
+        $profileConfig = Invoke-ProfileAutoSync @autoSyncArgs
 
-            $session   = Get-CASession @sessionArgs
-            $rawOutput = Invoke-CertutilView -Session $session -Restrict $viewParams.Restrict -Out $viewParams.Out
-            ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap |
-                Add-ResultMetadata -Profile $Profile -CAServer $ca.fqdn
-        } catch {
-            Write-Error "Failed to query issued certs from '$($ca.fqdn)': $_"
+        $fieldMap = @{}
+        if ($profileConfig.syncState -and $profileConfig.syncState.fieldNameMap) {
+            $profileConfig.syncState.fieldNameMap.PSObject.Properties |
+                ForEach-Object { $fieldMap[$_.Name] = $_.Value }
+        }
+
+        $viewParams = Get-CertutilViewParams -ProfileConfig $profileConfig -Operation 'issuedCerts'
+
+        $cas = if ($PSBoundParameters.ContainsKey('CAFqdn')) {
+            $found = $profileConfig.cas | Where-Object { $_.fqdn -eq $CAFqdn }
+            if (-not $found) { throw "CA '$CAFqdn' is not defined in profile '$Profile'." }
+            $found
+        } else { $profileConfig.cas }
+
+        foreach ($ca in $cas) {
+            try {
+                $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
+                if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
+
+                $session   = Get-CASession @sessionArgs
+                $caCulture = Get-CACulture -Session $session
+                $rawOutput = Invoke-CertutilView -Session $session -Restrict $viewParams.Restrict -Out $viewParams.Out
+                ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap -CACulture $caCulture |
+                    Add-ResultMetadata -Profile $Profile -CAServer $ca.fqdn
+            } catch {
+                Write-Error "Failed to query issued certs from '$($ca.fqdn)': $_"
+            }
         }
     }
 }

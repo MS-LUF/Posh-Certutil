@@ -10,7 +10,9 @@ function Revoke-PWSHCertutilIssuedCerts {
     .PARAMETER InputObject
         A certificate object with Profile, CAServer, and SerialNumber properties.
     .PARAMETER Profile
-        The configuration profile. Required in the Direct parameter set.
+        The configuration profile. Optional in the Direct parameter set; falls back to the
+        profile marked as default (see Set-PWSHCertutilConfig -DefaultProfile) when omitted.
+        Throws if omitted and no default profile is configured.
     .PARAMETER CAFqdn
         The CA where the certificate resides. Required in the Direct parameter set.
     .PARAMETER SerialNumber
@@ -37,9 +39,6 @@ function Revoke-PWSHCertutilIssuedCerts {
         [object] $InputObject,
 
         [Parameter(Mandatory, ParameterSetName = 'Direct')]
-        [string] $Profile,
-
-        [Parameter(Mandatory, ParameterSetName = 'Direct')]
         [string] $CAFqdn,
 
         [Parameter(Mandatory, ParameterSetName = 'Direct')]
@@ -55,17 +54,25 @@ function Revoke-PWSHCertutilIssuedCerts {
         [pscredential] $Credential
     )
 
+    dynamicparam {
+        New-ProfileDynamicParameter -ParameterSetName 'Direct'
+    }
+
     process {
         if ($PSCmdlet.ParameterSetName -eq 'Pipeline') {
             $Profile      = $InputObject.Profile
             $CAFqdn       = $InputObject.CAServer
             $SerialNumber = $InputObject.SerialNumber
+        } else {
+            $Profile = $PSBoundParameters['Profile']
         }
+
+        $config  = Read-ConfigFile
+        $Profile = Resolve-ProfileName -Config $config -ProfileName $Profile
 
         $target = "SerialNumber=$SerialNumber on $CAFqdn (Profile: $Profile, Reason: $Reason)"
         if (-not $PSCmdlet.ShouldProcess($target, 'Revoke certificate')) { return }
 
-        $config        = Read-ConfigFile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
         $sessionArgs = @{ CAFqdn = $CAFqdn; RemotingConfig = $profileConfig.remoting }

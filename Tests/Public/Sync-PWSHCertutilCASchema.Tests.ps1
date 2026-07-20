@@ -7,6 +7,7 @@ BeforeAll {
   "profiles": {
     "test-profile": {
       "description": "Test profile",
+      "defaultProfile": true,
       "remoting": { "useTls": true, "port": 5986, "maxSessionsPerCA": 2 },
       "cas": [
         { "fqdn": "ca01.test.local", "displayName": "CA 01" },
@@ -105,6 +106,30 @@ Describe 'Sync-PWSHCertutilCASchema' -Tag Unit {
             }
             { Sync-PWSHCertutilCASchema -Profile 'test-profile' -ErrorAction SilentlyContinue } |
                 Should -Not -Throw
+        }
+
+        It 'Falls back to the default profile when -Profile is omitted' {
+            $results = Sync-PWSHCertutilCASchema
+            $results[0].Profile | Should -Be 'test-profile'
+        }
+
+        It 'Throws when -Profile is omitted and no default profile is configured' {
+            $noDefaultPath = [IO.Path]::GetTempFileName()
+            '{"version":"1.0","profiles":{"other":{"description":"x","defaultProfile":false,"remoting":{"useTls":true,"port":5986,"maxSessionsPerCA":2},"cas":[],"certutilView":{"restrict":{},"out":{}}}}}' |
+                Set-Content -Path $noDefaultPath -Encoding UTF8
+            InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $noDefaultPath } {
+                param($ConfigPath)
+                $script:ConfigPath = $ConfigPath
+            }
+            try {
+                { Sync-PWSHCertutilCASchema } | Should -Throw -ExpectedMessage '*default profile*'
+            } finally {
+                Remove-Item -Path $noDefaultPath -ErrorAction SilentlyContinue
+                InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $script:TestConfigPath } {
+                    param($ConfigPath)
+                    $script:ConfigPath = $ConfigPath
+                }
+            }
         }
     }
 

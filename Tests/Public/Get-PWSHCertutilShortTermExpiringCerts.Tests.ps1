@@ -7,6 +7,7 @@ BeforeAll {
   "profiles": {
     "test-profile": {
       "description": "Test",
+      "defaultProfile": true,
       "remoting": { "useTls": true, "port": 5986, "maxSessionsPerCA": 2 },
       "cas": [{ "fqdn": "ca01.test.local", "displayName": "CA01" }],
       "certutilView": {
@@ -43,6 +44,7 @@ AfterAll {
 Describe 'Get-PWSHCertutilShortTermExpiringCerts' -Tag Unit {
     BeforeEach {
         Mock -ModuleName Posh-Certutil Get-CASession      { $fakeSession }
+        Mock -ModuleName Posh-Certutil Get-CACulture      { 'en-US' }
         Mock -ModuleName Posh-Certutil Get-CALocalDate    { @{ Today = '01/01/2026'; ExpireDate = '01/31/2026' } }
         Mock -ModuleName Posh-Certutil Invoke-CertutilView { @('"RequestID","CommonName","NotAfter"') }
     }
@@ -68,5 +70,29 @@ Describe 'Get-PWSHCertutilShortTermExpiringCerts' -Tag Unit {
     It 'Rejects -Days values not in the allowed set' {
         { Get-PWSHCertutilShortTermExpiringCerts -Profile 'test-profile' -Days 45 } |
             Should -Throw
+    }
+
+    It 'Falls back to the default profile when -Profile is omitted' {
+        Get-PWSHCertutilShortTermExpiringCerts | Out-Null
+        Should -Invoke -ModuleName Posh-Certutil Get-CASession -Times 1
+    }
+
+    It 'Throws when -Profile is omitted and no default profile is configured' {
+        $noDefaultPath = [IO.Path]::GetTempFileName()
+        '{"version":"1.0","profiles":{"other":{"description":"x","defaultProfile":false,"remoting":{"useTls":true,"port":5986,"maxSessionsPerCA":2},"cas":[],"certutilView":{"restrict":{},"out":{}}}}}' |
+            Set-Content -Path $noDefaultPath -Encoding UTF8
+        InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $noDefaultPath } {
+            param($ConfigPath)
+            $script:ConfigPath = $ConfigPath
+        }
+        try {
+            { Get-PWSHCertutilShortTermExpiringCerts } | Should -Throw -ExpectedMessage '*default profile*'
+        } finally {
+            Remove-Item -Path $noDefaultPath -ErrorAction SilentlyContinue
+            InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $script:TestConfigPath } {
+                param($ConfigPath)
+                $script:ConfigPath = $ConfigPath
+            }
+        }
     }
 }

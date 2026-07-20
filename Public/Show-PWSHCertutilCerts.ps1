@@ -10,7 +10,9 @@ function Show-PWSHCertutilCerts {
     .PARAMETER InputObject
         A certificate object with Profile, CAServer, and RequestID properties.
     .PARAMETER Profile
-        The configuration profile. Required in the Direct parameter set.
+        The configuration profile. Optional in the Direct parameter set; falls back to the
+        profile marked as default (see Set-PWSHCertutilConfig -DefaultProfile) when omitted.
+        Throws if omitted and no default profile is configured.
     .PARAMETER CAFqdn
         The CA FQDN where the certificate resides. Required in the Direct parameter set.
     .PARAMETER RequestID
@@ -34,9 +36,6 @@ function Show-PWSHCertutilCerts {
         [object] $InputObject,
 
         [Parameter(Mandatory, ParameterSetName = 'Direct')]
-        [string] $Profile,
-
-        [Parameter(Mandatory, ParameterSetName = 'Direct')]
         [string] $CAFqdn,
 
         [Parameter(Mandatory, ParameterSetName = 'Direct')]
@@ -46,14 +45,21 @@ function Show-PWSHCertutilCerts {
         [pscredential] $Credential
     )
 
+    dynamicparam {
+        New-ProfileDynamicParameter -ParameterSetName 'Direct'
+    }
+
     process {
         if ($PSCmdlet.ParameterSetName -eq 'Pipeline') {
             $Profile   = $InputObject.Profile
             $CAFqdn    = $InputObject.CAServer
             $RequestID = $InputObject.RequestID
+        } else {
+            $Profile = $PSBoundParameters['Profile']
         }
 
         $config        = Read-ConfigFile
+        $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
         $autoSyncArgs = @{ Config = $config; ProfileName = $Profile; ProfileConfig = $profileConfig }

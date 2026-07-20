@@ -7,6 +7,7 @@ BeforeAll {
   "profiles": {
     "test-profile": {
       "description": "Test",
+      "defaultProfile": true,
       "remoting": { "useTls": true, "port": 5986, "maxSessionsPerCA": 2 },
       "cas": [{ "fqdn": "ca01.test.local", "displayName": "CA01" }],
       "certutilView": { "restrict": {}, "out": {} }
@@ -72,5 +73,44 @@ Describe 'Revoke-PWSHCertutilIssuedCerts' -Tag Unit {
         { Revoke-PWSHCertutilIssuedCerts -Profile 'test-profile' -CAFqdn 'ca01.test.local' `
               -SerialNumber '1A2B3C4D5E6F' -Confirm:$false -ErrorAction Stop } |
             Should -Throw
+    }
+
+    It 'Falls back to the default profile when -Profile is omitted' {
+        $result = Revoke-PWSHCertutilIssuedCerts -CAFqdn 'ca01.test.local' `
+                      -SerialNumber '1A2B3C4D5E6F' -Confirm:$false
+        $result.Profile | Should -Be 'test-profile'
+    }
+
+    It 'Throws when -Profile is omitted and no default profile is configured' {
+        $noDefaultPath = [IO.Path]::GetTempFileName()
+        '{"version":"1.0","profiles":{"other":{"description":"x","defaultProfile":false,"remoting":{"useTls":true,"port":5986,"maxSessionsPerCA":2},"cas":[],"certutilView":{"restrict":{},"out":{}}}}}' |
+            Set-Content -Path $noDefaultPath -Encoding UTF8
+        InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $noDefaultPath } {
+            param($ConfigPath)
+            $script:ConfigPath = $ConfigPath
+        }
+        try {
+            { Revoke-PWSHCertutilIssuedCerts -CAFqdn 'ca01.test.local' `
+                  -SerialNumber '1A2B3C4D5E6F' -Confirm:$false } |
+                Should -Throw -ExpectedMessage '*default profile*'
+        } finally {
+            Remove-Item -Path $noDefaultPath -ErrorAction SilentlyContinue
+            InModuleScope Posh-Certutil -Parameters @{ ConfigPath = $script:TestConfigPath } {
+                param($ConfigPath)
+                $script:ConfigPath = $ConfigPath
+            }
+        }
+    }
+
+    It '-Profile is a dynamic parameter that offers tab completion for configured profiles (Direct set)' {
+        $line    = 'Revoke-PWSHCertutilIssuedCerts -CAFqdn ca01.test.local -Profile '
+        $results = TabExpansion2 -inputScript $line -cursorColumn $line.Length
+        $results.CompletionMatches.CompletionText | Should -Contain 'test-profile'
+    }
+
+    It 'Rejects an unknown -Profile value in the Direct parameter set' {
+        { Revoke-PWSHCertutilIssuedCerts -Profile 'does-not-exist' -CAFqdn 'ca01.test.local' `
+              -SerialNumber '1A2B3C4D5E6F' -Confirm:$false -ErrorAction Stop } |
+            Should -Throw -ExpectedMessage '*ValidateSet*'
     }
 }
