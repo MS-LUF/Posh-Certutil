@@ -27,6 +27,8 @@ function Get-PWSHCertutilConfig {
     process {
         $Profile = $PSBoundParameters['Profile']
         $config  = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -Message 'Cmdlet invoked' -BoundParameters $PSBoundParameters
 
         if ($PSBoundParameters.ContainsKey('Profile')) {
             $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile

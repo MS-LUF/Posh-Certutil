@@ -1,7 +1,7 @@
 # Posh-Certutil
 
 ## Description
-**Version 0.5.9**
+**Version 0.6.1** : add log management (evt or log file) + split certificatetemplate properties data to isolate template displayname and OID
 
 A Windows PowerShell module that wraps `certutil.exe` and `certreq.exe` using PowerShell Remoting (WinRM) to execute commands locally on each CA server and aggregate the results as typed PowerShell objects.
 
@@ -154,6 +154,45 @@ the "Alias" columns above) — e.g. `Get-PWSHCertutilIssuedCert -Profile 'prod-p
 like `Get-PWSHCertutilIssuedCerts -Profile 'prod-pki'`.
 
 `-Profile` is optional on every cmdlet except `Set-PWSHCertutilConfig`. When omitted, the profile marked `-DefaultProfile $true` is used; if no profile is marked default, the cmdlet throws.
+
+---
+
+## Logging
+
+Every public cmdlet can log its invocations and outcomes to a file or the Windows Event Log. It's
+opt-in — configs written before this feature has no `Logging` key at all, which is equivalent to
+disabled. Enable it by editing the `Logging` section of `Posh-Certutil.json`:
+
+```json
+"Logging": {
+  "Enabled": true,
+  "MinimumLevel": "Information",
+  "Mode": "File",
+  "File": {
+    "Path": "%USERPROFILE%\\Documents\\Logs",
+    "FileName": "Posh-Certutil-{yyyyMMdd}.log"
+  },
+  "EventLog": {
+    "LogName": "Application",
+    "Source": "Posh-Certutil",
+    "EventIdInformation": 1000,
+    "EventIdWarning": 2000,
+    "EventIdError": 3000
+  }
+}
+```
+
+- `MinimumLevel` filters entries below `Debug` / `Information` / `Warning` / `Error`.
+- `Mode` selects the destination: `File` (default) or `EventLog`.
+- Every entry is stamped with the Windows identity running the command, so audit trails always tie
+  back to who ran the action, not just which profile/CA it targeted.
+- `Debug`-level entries log each cmdlet invocation with its bound parameters — `Credential`,
+  `Password`, `Secret`, and `Token`-named parameters are redacted before writing.
+- A broken logging destination (bad path, permissions, unreachable event log) never breaks a
+  cmdlet's actual certutil/certreq work — it emits one `Write-Warning` for the session and is
+  silently skipped afterwards.
+
+See [Docs/ConfigSchema.md](Docs/ConfigSchema.md#logging) for the full field reference.
 
 ---
 

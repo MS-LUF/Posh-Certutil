@@ -31,6 +31,29 @@ function ConvertFrom-CertutilCsv {
         }
     }
 
+    # certutil's CertificateTemplate column is "<OID> <DisplayName>" for V2/V3 templates
+    # (the display name may itself contain spaces) or just the plain name for legacy V1
+    # templates (no OID). Split into two properties whenever the column is present, in
+    # addition to the original combined value.
+    $renamed = $renamed | ForEach-Object {
+        $obj = $_
+        if ($obj.PSObject.Properties.Name -contains 'CertificateTemplate') {
+            $rawValue = $obj.CertificateTemplate
+            if ($rawValue -match '^(?<oid>\d+(?:\.\d+){4,})\s+(?<name>.+)$') {
+                $oid  = $Matches.oid
+                $name = $Matches.name
+            } else {
+                $oid  = $null
+                $name = if ([string]::IsNullOrWhiteSpace($rawValue)) { $null } else { $rawValue }
+            }
+            $obj |
+                Add-Member -MemberType NoteProperty -Name 'CertificateTemplateOID' -Value $oid -Force -PassThru |
+                Add-Member -MemberType NoteProperty -Name 'CertificateTemplateDisplayName' -Value $name -Force -PassThru
+        } else {
+            $obj
+        }
+    }
+
     if (-not $CACulture) { return $renamed }
 
     # certutil writes date/time columns in the CA server's own locale — parse using that

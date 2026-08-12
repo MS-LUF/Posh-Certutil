@@ -69,7 +69,10 @@ function Set-PWSHCertutilConfig {
         if ($UseTls) { $Port = 5986 } else { $Port = 5985 }
     }
 
-    $config          = Read-ConfigFile
+    $config = Read-ConfigFile
+    Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+        -ProfileName $Profile -Message 'Cmdlet invoked' -BoundParameters $PSBoundParameters
+
     $existingProfile = $null
     if ($config.profiles.PSObject.Properties.Name -contains $Profile) {
         $existingProfile = $config.profiles.$Profile
@@ -127,6 +130,8 @@ function Set-PWSHCertutilConfig {
         }
         $config | ConvertTo-Json -Depth 10 | Set-Content -Path $script:ConfigPath -Encoding UTF8
         Write-Verbose "Profile '$Profile' written to $script:ConfigPath"
+        Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -Message "Profile written to Posh-Certutil.json (DefaultProfile=$isDefault)"
         Get-PWSHCertutilConfig -Profile $Profile
     }
 }

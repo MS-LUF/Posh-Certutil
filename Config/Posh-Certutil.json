@@ -1,5 +1,21 @@
 {
   "version": "1.0",
+  "Logging": {
+    "Enabled": false,
+    "MinimumLevel": "Information",
+    "Mode": "File",
+    "File": {
+      "Path": "%USERPROFILE%\\Documents\\Logs",
+      "FileName": "Posh-Certutil-{yyyyMMdd}.log"
+    },
+    "EventLog": {
+      "LogName": "Application",
+      "Source": "Posh-Certutil",
+      "EventIdInformation": 1000,
+      "EventIdWarning": 2000,
+      "EventIdError": 3000
+    }
+  },
   "profiles": {
     "example-profile": {
       "description": "Example profile — rename and update for your environment.",

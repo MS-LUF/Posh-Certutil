@@ -2,6 +2,15 @@ $script:SessionPool = [System.Collections.Concurrent.ConcurrentDictionary[string
 $script:ModuleRoot  = $PSScriptRoot
 $script:ConfigPath  = Join-Path -Path $PSScriptRoot -ChildPath 'Config\Posh-Certutil.json'
 
+# Logging severity order, used by Write-PWSHCertutilLog to compare a log entry's Level
+# against the configured MinimumLevel. Debug also doubles as the EventLog entry
+# type/EventId for Debug-level entries, since Windows Event Log has no Debug type.
+$script:LogLevelSeverity   = @{ Debug = 0; Information = 1; Warning = 2; Error = 3 }
+# "Warn once per session" flags so a misconfigured or unreachable logging destination
+# doesn't spam Write-Warning on every single log call inside a per-CA loop.
+$script:LoggingConfigWarned = $false
+$script:LoggingSinkFailed   = $false
+
 # Singular-noun aliases for cmdlets whose noun predates the PowerShell approved-verb/noun
 # guideline requiring singular nouns. The plural name stays the canonical, exported function.
 $script:CmdletAliases = @{

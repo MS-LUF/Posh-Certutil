@@ -132,6 +132,68 @@ InModuleScope Posh-Certutil {
             $result[0].NotBefore | Should -Be 'not-a-date'
             $warnings | Should -Not -BeNullOrEmpty
         }
+
+        It 'Splits a V2/V3 CertificateTemplate value into OID and DisplayName, keeping the original property' {
+            $raw = @(
+                '"RequestID","CertificateTemplate"',
+                '"1","1.3.6.1.4.1.311.21.8.2368430.6889121.6207572.5586372.9787823.85.1.1 WebServer"'
+            )
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw
+            $result[0].CertificateTemplate            | Should -Be '1.3.6.1.4.1.311.21.8.2368430.6889121.6207572.5586372.9787823.85.1.1 WebServer'
+            $result[0].CertificateTemplateOID          | Should -Be '1.3.6.1.4.1.311.21.8.2368430.6889121.6207572.5586372.9787823.85.1.1'
+            $result[0].CertificateTemplateDisplayName  | Should -Be 'WebServer'
+        }
+
+        It 'Keeps a multi-word display name intact when splitting CertificateTemplate' {
+            $raw = @(
+                '"RequestID","CertificateTemplate"',
+                '"1","1.3.6.1.4.1.311.21.8.2368430.6889121.6207572.5586372.9787823.85.1.1 Custom Web Server Template"'
+            )
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw
+            $result[0].CertificateTemplateOID         | Should -Be '1.3.6.1.4.1.311.21.8.2368430.6889121.6207572.5586372.9787823.85.1.1'
+            $result[0].CertificateTemplateDisplayName | Should -Be 'Custom Web Server Template'
+        }
+
+        It 'Treats a legacy V1 template value (no OID) as the DisplayName with a null OID' {
+            $raw = @(
+                '"RequestID","CertificateTemplate"',
+                '"1","SubCA"'
+            )
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw
+            $result[0].CertificateTemplateOID         | Should -BeNullOrEmpty
+            $result[0].CertificateTemplateDisplayName | Should -Be 'SubCA'
+        }
+
+        It 'Treats an empty CertificateTemplate value as null for both split properties' {
+            $raw = @(
+                '"RequestID","CertificateTemplate"',
+                '"1",""'
+            )
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw
+            $result[0].CertificateTemplateOID         | Should -BeNullOrEmpty
+            $result[0].CertificateTemplateDisplayName | Should -BeNullOrEmpty
+        }
+
+        It 'Does not add CertificateTemplate split properties when the column is absent' {
+            $raw = @(
+                '"RequestID","CommonName"',
+                '"1","server01.corp.local"'
+            )
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw
+            $result[0].PSObject.Properties.Name | Should -Not -Contain 'CertificateTemplateOID'
+            $result[0].PSObject.Properties.Name | Should -Not -Contain 'CertificateTemplateDisplayName'
+        }
+
+        It 'Splits CertificateTemplate after FieldMap renaming (operates on the canonical name)' {
+            $raw = @(
+                '"Issued Certificate Template"',
+                '"1.3.6.1.4.1.311.21.8.2368430.6889121.6207572.5586372.9787823.85.1.1 WebServer"'
+            )
+            $map    = @{ 'Issued Certificate Template' = 'CertificateTemplate' }
+            $result = ConvertFrom-CertutilCsv -RawOutput $raw -FieldMap $map
+            $result[0].CertificateTemplateOID         | Should -Be '1.3.6.1.4.1.311.21.8.2368430.6889121.6207572.5586372.9787823.85.1.1'
+            $result[0].CertificateTemplateDisplayName | Should -Be 'WebServer'
+        }
     }
 
     Describe 'Get-CACulture' -Tag Unit {

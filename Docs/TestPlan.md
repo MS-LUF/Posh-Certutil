@@ -5,7 +5,7 @@
 - Framework: **Pester 5** (minimum version 5.3)
 - All test scripts: `Tests\` folder at the repository root
 - Public function tests: `Tests\Public\<FunctionName>.Tests.ps1`
-- Private function tests: `Tests\Private\Config.Tests.ps1`, `Session.Tests.ps1`, `Certutil.Tests.ps1`
+- Private function tests: `Tests\Private\Config.Tests.ps1`, `Session.Tests.ps1`, `Certutil.Tests.ps1`, `Logging.Tests.ps1`
 
 ## Test categories
 
@@ -302,6 +302,12 @@ Tested via `InModuleScope 'Posh-Certutil'`.
 | `ConvertFrom-CertutilCsv` | Empty date value — becomes $null, not an exception | Unit |
 | `ConvertFrom-CertutilCsv` | Date parsing applied after FieldMap rename (operates on canonical names) | Unit |
 | `ConvertFrom-CertutilCsv` | Unparseable date string — Write-Warning emitted, original string preserved | Unit |
+| `ConvertFrom-CertutilCsv` | V2/V3 CertificateTemplate value ("OID Name") — split into CertificateTemplateOID/DisplayName, original property kept | Unit |
+| `ConvertFrom-CertutilCsv` | Multi-word display name — split preserves the full name, not just the first word | Unit |
+| `ConvertFrom-CertutilCsv` | Legacy V1 CertificateTemplate value (no OID) — CertificateTemplateOID is null, full value becomes DisplayName | Unit |
+| `ConvertFrom-CertutilCsv` | Empty CertificateTemplate value — both split properties become $null | Unit |
+| `ConvertFrom-CertutilCsv` | CertificateTemplate column absent — no split properties added | Unit |
+| `ConvertFrom-CertutilCsv` | CertificateTemplate split applied after FieldMap rename (operates on canonical name) | Unit |
 | `Get-CertutilFieldNameMap` | Success — returns localized→canonical hashtable | Unit |
 | `Get-CertutilFieldNameMap` | CA returns no CSV header — throws | Unit |
 | `Get-CertutilFieldNameMap` | Column count mismatch — throws | Unit |
@@ -331,6 +337,34 @@ Tested via `InModuleScope 'Posh-Certutil'`.
 | `ConvertFrom-CertutilAsn1` | Valid base64 DER — returns decoded object | Unit |
 | `ConvertFrom-CertutilAsn1` | Invalid base64 — throws | Unit |
 | `Add-ResultMetadata` | Stamps Profile + CAServer on each piped object | Unit |
+
+### Logging layer (`Tests\Private\Logging.Tests.ps1`)
+
+| Function | Scenario | Tag |
+|---|---|---|
+| `Get-LoggingConfig` | Logging key absent entirely — Enabled defaults to $false | Unit |
+| `Get-LoggingConfig` | Logging key absent — MinimumLevel/Mode/File/EventLog all defaulted | Unit |
+| `Get-LoggingConfig` | Fully populated section — every value passed through unchanged | Unit |
+| `Get-LoggingConfig` | Unknown MinimumLevel — falls back to Information, warns | Unit |
+| `Get-LoggingConfig` | Unknown Mode — falls back to File, warns | Unit |
+| `Resolve-LogFilePath` | Expands %ENV% variables in Path | Unit |
+| `Resolve-LogFilePath` | Expands a {DateFormat} token in FileName using the current date | Unit |
+| `Resolve-LogFilePath` | Creates the target directory when it does not exist | Unit |
+| `Write-FileLogEntry` | Appends a formatted line containing level, user, cmdlet, and message | Unit |
+| `Write-FileLogEntry` | Does not throw and warns once when the destination cannot be written | Unit |
+| `Write-EventLogEntry` | Creates the event source when it does not already exist | Unit |
+| `Write-EventLogEntry` | Skips source creation when the source already exists | Unit |
+| `Write-EventLogEntry` | Writes with EventIdWarning/EntryType Warning for Level Warning | Unit |
+| `Write-EventLogEntry` | Writes with EventIdError/EntryType Error for Level Error | Unit |
+| `Write-EventLogEntry` | Writes Debug-level entries as EventIdInformation/Information with a [DEBUG] prefix | Unit |
+| `Write-EventLogEntry` | Does not throw and warns once when writing to the event log fails | Unit |
+| `Write-PWSHCertutilLog` | No-ops without dispatching when Logging.Enabled is $false | Unit |
+| `Write-PWSHCertutilLog` | No-ops when the entry Level is below MinimumLevel | Unit |
+| `Write-PWSHCertutilLog` | Dispatches to Write-FileLogEntry when Mode is File and Level meets MinimumLevel | Unit |
+| `Write-PWSHCertutilLog` | Dispatches to Write-EventLogEntry when Mode is EventLog | Unit |
+| `Write-PWSHCertutilLog` | Stamps the current Windows identity on the entry | Unit |
+| `Write-PWSHCertutilLog` | Redacts Credential/Password/Secret/Token-named bound parameters | Unit |
+| `Write-PWSHCertutilLog` | Does not throw when Get-LoggingConfig itself throws | Unit |
 
 ---
 

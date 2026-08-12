@@ -47,7 +47,10 @@ function Get-PWSHCertutilShortTermExpiringCerts {
     process {
         $Profile = $PSBoundParameters['Profile']
 
-        $config        = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -Message 'Cmdlet invoked' -BoundParameters $PSBoundParameters
+
         $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
@@ -69,6 +72,9 @@ function Get-PWSHCertutilShortTermExpiringCerts {
 
         foreach ($ca in $cas) {
             try {
+                Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "Querying certificates expiring within $Days day(s) via certutil -view"
+
                 $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
                 if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
 
@@ -79,9 +85,15 @@ function Get-PWSHCertutilShortTermExpiringCerts {
                 $viewParams = Get-CertutilViewParams -ProfileConfig $profileConfig -Operation 'expiringCerts' `
                                   -Substitutions @{ TODAY = $caDate.Today; EXPIRE_DATE = $caDate.ExpireDate }
                 $rawOutput  = Invoke-CertutilView -Session $session -Restrict $viewParams.Restrict -Out $viewParams.Out
-                ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap -CACulture $caCulture |
-                    Add-ResultMetadata -Profile $Profile -CAServer $ca.fqdn
+                $results    = @(ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap -CACulture $caCulture |
+                    Add-ResultMetadata -Profile $Profile -CAServer $ca.fqdn)
+
+                Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "Retrieved $($results.Count) expiring certificate(s)"
+                $results
             } catch {
+                Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "Failed to query expiring certs: $_"
                 Write-Error "Failed to query expiring certs from '$($ca.fqdn)': $_"
             }
         }

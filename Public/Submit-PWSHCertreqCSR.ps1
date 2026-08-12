@@ -80,7 +80,11 @@ function Submit-PWSHCertreqCSR {
     process {
         $Profile = $PSBoundParameters['Profile']
 
-        $config        = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "Cmdlet invoked, submitting CSR '$CSRPath' with template '$CertificateTemplate'" `
+            -BoundParameters $PSBoundParameters
+
         $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
@@ -94,6 +98,9 @@ function Submit-PWSHCertreqCSR {
         $session = Get-CASession @sessionArgs
 
         try {
+            Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Submitting CSR via certreq -submit"
+
             $result = Invoke-CertreqSubmit -Session $session -CSRBytes $csrBytes `
                           -CertificateTemplate $CertificateTemplate
 
@@ -106,6 +113,9 @@ function Submit-PWSHCertreqCSR {
                 }
             }
 
+            Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "CSR submitted, RequestID=$($result.RequestID) Status=$($result.Status)"
+
             [PSCustomObject]@{
                 Profile             = $Profile
                 CAServer            = $CAFqdn
@@ -117,6 +127,8 @@ function Submit-PWSHCertreqCSR {
                 RawOutput           = $result.RawOutput
             }
         } catch {
+            Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Failed to submit CSR: $_"
             Write-Error "Failed to submit CSR to '$CAFqdn': $_"
         }
     }

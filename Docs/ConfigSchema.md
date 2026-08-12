@@ -13,6 +13,7 @@ The path is set in `Posh-Certutil.psm1` as `$script:ConfigPath` and is read on e
 ```json
 {
   "version": "1.0",
+  "Logging": { ... },
   "profiles": {
     "<profile-name>": { ... }
   }
@@ -22,7 +23,63 @@ The path is set in `Posh-Certutil.psm1` as `$script:ConfigPath` and is read on e
 | Field | Type | Description |
 |---|---|---|
 | `version` | string | Schema version. Currently `"1.0"`. |
+| `Logging` | object | Optional. Global logging configuration — see [Logging](#logging) below. Absent entirely on configs written before this feature existed, which is equivalent to `Enabled: false`. |
 | `profiles` | object | Named profile objects. Add, remove, or rename freely. |
+
+---
+
+## Logging
+
+Global (not per-profile) configuration for `Write-PWSHCertutilLog`, the central logging entry point
+called by every public cmdlet.
+
+```json
+{
+  "Logging": {
+    "Enabled": false,
+    "MinimumLevel": "Information",
+    "Mode": "File",
+    "File": {
+      "Path": "%USERPROFILE%\\Documents\\Logs",
+      "FileName": "Posh-Certutil-{yyyyMMdd}.log"
+    },
+    "EventLog": {
+      "LogName": "Application",
+      "Source": "Posh-Certutil",
+      "EventIdInformation": 1000,
+      "EventIdWarning": 2000,
+      "EventIdError": 3000
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `Enabled` | bool | `false` | Master on/off switch. Opt-in so existing configs keep working unchanged. |
+| `MinimumLevel` | string | `Information` | One of `Debug`, `Information`, `Warning`, `Error`. Entries below this severity are dropped. An unrecognized value falls back to `Information` with one `Write-Warning` per session. |
+| `Mode` | string | `File` | `File` or `EventLog`. An unrecognized value falls back to `File` with one `Write-Warning` per session. |
+| `File.Path` | string | `%TEMP%\Posh-Certutil` | Directory for the log file. Environment variables are expanded (`Resolve-LogFilePath`); created automatically if missing. |
+| `File.FileName` | string | `Posh-Certutil-{yyyyMMdd}.log` | Log file name. `{...}` is a .NET date format token evaluated against the current date, so the file rolls over daily by default. |
+| `EventLog.LogName` | string | `Application` | Target Windows Event Log. |
+| `EventLog.Source` | string | `Posh-Certutil` | Event source; registered automatically via `New-EventLog` on first write if it doesn't already exist (requires an elevated session the first time). |
+| `EventLog.EventIdInformation` | int | `1000` | Event ID used for `Information` entries and (with a `[DEBUG]` message prefix) `Debug` entries, since Windows Event Log has no Debug entry type. |
+| `EventLog.EventIdWarning` | int | `2000` | Event ID used for `Warning` entries. |
+| `EventLog.EventIdError` | int | `3000` | Event ID used for `Error` entries. |
+
+Every entry is stamped with `[System.Security.Principal.WindowsIdentity]::GetCurrent().Name` — the
+identity running PowerShell, not a service account — so audit trails tie back to who ran the action.
+`Debug`-level entries additionally accept the calling cmdlet's `$PSBoundParameters`; any parameter
+named `Credential`/`Password`/`Secret`/`Token` (substring match) is redacted to `<redacted>` before
+the message is written.
+
+**Never throws.** A failure writing to either destination (bad path, permissions, unreachable event
+log, missing elevation to register a source) is caught, surfaced once per session via
+`Write-Warning`, and silently skipped for the rest of the session — a broken logging destination
+must never interrupt the cmdlet's actual certutil/certreq work.
+
+Read via `Get-LoggingConfig`, which normalizes every key so callers never null-check — see
+[Docs/Architecture.md](Architecture.md#logging).
 
 ---
 
@@ -106,6 +163,7 @@ Controls what certutil `-restrict` and `-out` strings are sent for each operatio
 - **These names must match the CA database schema.** Common names: `RequestID`, `RequesterName`, `CommonName`, `NotBefore`, `NotAfter`, `SerialNumber`, `CertificateTemplate`, `Disposition`, `RevokedReason`, `RevokedEffectiveWhen`, `BinaryCertificate`.
 - Field names are case-sensitive and CA-version-dependent. Validate against your CAs using `certutil -schema` on the CA.
 - Adding or removing fields here changes what properties appear on output objects immediately — no module reload required.
+- Including `CertificateTemplate` also adds two derived properties, `CertificateTemplateOID` and `CertificateTemplateDisplayName`, split out by `ConvertFrom-CertutilCsv` (see `Docs/Architecture.md#output-object-contract`). Omitting `CertificateTemplate` from `out` suppresses all three properties — there's no separate config knob for hiding just the derived ones.
 
 ### `syncState`
 

@@ -57,7 +57,11 @@ function Get-PWSHCertutilCertStatus {
             $Profile = $PSBoundParameters['Profile']
         }
 
-        $config        = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "Cmdlet invoked, checking status of RequestID=$RequestID" `
+            -BoundParameters $PSBoundParameters
+
         $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
@@ -76,6 +80,9 @@ function Get-PWSHCertutilCertStatus {
         $session   = Get-CASession @sessionArgs
         $caCulture = Get-CACulture -Session $session
 
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "Querying status for RequestID=$RequestID via certutil -view"
+
         $sb = {
             param($ReqID)
             $restrict = "RequestID=$ReqID"
@@ -86,6 +93,8 @@ function Get-PWSHCertutilCertStatus {
         $csvData   = ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap -CACulture $caCulture
 
         if (-not $csvData) {
+            Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "No certificate found with RequestID=$RequestID"
             Write-Error "No certificate found with RequestID $RequestID on $CAFqdn"
             return
         }
@@ -101,6 +110,9 @@ function Get-PWSHCertutilCertStatus {
         if ($row.BinaryCertificate) {
             $certDecoded = ConvertFrom-CertutilAsn1 -CertBase64 ($row.BinaryCertificate -replace '\s', '')
         }
+
+        Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "RequestID=$RequestID Status=$status"
 
         [PSCustomObject]@{
             Profile     = $Profile

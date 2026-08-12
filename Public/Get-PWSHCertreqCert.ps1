@@ -74,7 +74,11 @@ function Get-PWSHCertreqCert {
             $Profile = $PSBoundParameters['Profile']
         }
 
-        $config        = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "Cmdlet invoked, retrieving RequestID=$RequestID" `
+            -BoundParameters $PSBoundParameters
+
         $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
@@ -83,6 +87,9 @@ function Get-PWSHCertreqCert {
         $session = Get-CASession @sessionArgs
 
         try {
+            Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Retrieving RequestID=$RequestID via certreq -retrieve"
+
             $result = Invoke-CertreqRetrieve -Session $session -RequestID $RequestID
 
             $certificate = $null
@@ -94,6 +101,9 @@ function Get-PWSHCertreqCert {
                 }
             }
 
+            Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "RequestID=$RequestID Status=$($result.Status)"
+
             [PSCustomObject]@{
                 Profile     = $Profile
                 CAServer    = $CAFqdn
@@ -104,6 +114,8 @@ function Get-PWSHCertreqCert {
                 RawOutput   = $result.RawOutput
             }
         } catch {
+            Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Failed to retrieve RequestID=$RequestID : $_"
             Write-Error "Failed to retrieve certificate for RequestID $RequestID from '$CAFqdn': $_"
         }
     }

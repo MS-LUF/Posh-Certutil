@@ -67,7 +67,11 @@ function Revoke-PWSHCertutilIssuedCerts {
             $Profile = $PSBoundParameters['Profile']
         }
 
-        $config  = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "Cmdlet invoked, requesting revoke of SerialNumber=$SerialNumber Reason=$Reason" `
+            -BoundParameters $PSBoundParameters
+
         $Profile = Resolve-ProfileName -Config $config -ProfileName $Profile
 
         $target = "SerialNumber=$SerialNumber on $CAFqdn (Profile: $Profile, Reason: $Reason)"
@@ -80,8 +84,16 @@ function Revoke-PWSHCertutilIssuedCerts {
         $session = Get-CASession @sessionArgs
 
         try {
+            Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Revoking SerialNumber=$SerialNumber via certutil -revoke"
+
             $output  = Invoke-CertutilRevoke -Session $session -SerialNumber $SerialNumber -Reason $Reason
             $success = $output -notmatch 'FAILED'
+
+            $logLevel = if ($success) { 'Information' } else { 'Warning' }
+            Write-PWSHCertutilLog -Config $config -Level $logLevel -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Revoked SerialNumber=$SerialNumber Reason=$Reason Success=$success"
+
             [PSCustomObject]@{
                 Profile      = $Profile
                 CAServer     = $CAFqdn
@@ -91,6 +103,8 @@ function Revoke-PWSHCertutilIssuedCerts {
                 Output       = $output -join "`n"
             }
         } catch {
+            Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Failed to revoke SerialNumber=$SerialNumber : $_"
             Write-Error "Failed to revoke SerialNumber $SerialNumber on $CAFqdn : $_"
         }
     }

@@ -68,7 +68,11 @@ function Approve-PWSHCertutilPendingCert {
             $Profile = $PSBoundParameters['Profile']
         }
 
-        $config  = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "Cmdlet invoked, requesting approval of RequestID=$RequestID" `
+            -BoundParameters $PSBoundParameters
+
         $Profile = Resolve-ProfileName -Config $config -ProfileName $Profile
 
         $target = "RequestID=$RequestID on $CAFqdn (Profile: $Profile)"
@@ -81,8 +85,16 @@ function Approve-PWSHCertutilPendingCert {
         $session = Get-CASession @sessionArgs
 
         try {
+            Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Approving RequestID=$RequestID via certutil -resubmit"
+
             $output  = Invoke-CertutilResubmit -Session $session -RequestID $RequestID
             $success = $output -notmatch 'FAILED'
+
+            $logLevel = if ($success) { 'Information' } else { 'Warning' }
+            Write-PWSHCertutilLog -Config $config -Level $logLevel -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Approved RequestID=$RequestID Success=$success"
+
             [PSCustomObject]@{
                 Profile   = $Profile
                 CAServer  = $CAFqdn
@@ -91,6 +103,8 @@ function Approve-PWSHCertutilPendingCert {
                 Output    = $output -join "`n"
             }
         } catch {
+            Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "Failed to approve RequestID=$RequestID : $_"
             Write-Error "Failed to approve RequestID $RequestID on '$CAFqdn': $_"
         }
     }

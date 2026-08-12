@@ -65,7 +65,10 @@ function Sync-PWSHCertutilCASchema {
     process {
         $Profile = $PSBoundParameters['Profile']
 
-        $config        = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -Message 'Cmdlet invoked' -BoundParameters $PSBoundParameters
+
         $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
@@ -80,6 +83,9 @@ function Sync-PWSHCertutilCASchema {
 
         foreach ($ca in $cas) {
             try {
+                Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message 'Discovering CA database schema via certutil -schema'
+
                 $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
                 if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
                 $session = Get-CASession @sessionArgs
@@ -89,7 +95,11 @@ function Sync-PWSHCertutilCASchema {
 
                 $schemaPerCA.Add([PSCustomObject]@{ CAFqdn = $ca.fqdn; Fields = $fields })
                 Write-Verbose "CA '$($ca.fqdn)': $($fields.Count) schema fields discovered."
+                Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "$($fields.Count) schema field(s) discovered"
             } catch {
+                Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "Failed to retrieve schema: $_"
                 Write-Error "Failed to retrieve schema from '$($ca.fqdn)': $_"
             }
         }
@@ -181,12 +191,16 @@ function Sync-PWSHCertutilCASchema {
                     $profileConfig | Add-Member -MemberType NoteProperty -Name 'syncState' -Value $syncState -Force
                     Write-Verbose "Field name map built from probe query against '$probeCA'."
                 } catch {
+                    Write-PWSHCertutilLog -Config $config -Level Warning -CmdletName $MyInvocation.MyCommand.Name `
+                        -ProfileName $Profile -Message "Could not build field name map: $_"
                     Write-Warning "Could not build field name map for profile '$Profile': $_"
                 }
 
                 $config | ConvertTo-Json -Depth 10 | Set-Content -Path $script:ConfigPath -Encoding UTF8
                 $configUpdated = $true
                 Write-Verbose "Profile '$Profile' out fields updated in $script:ConfigPath"
+                Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -Message 'certutilView.out field lists updated in Posh-Certutil.json'
             }
         }
 

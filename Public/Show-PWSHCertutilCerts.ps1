@@ -58,7 +58,11 @@ function Show-PWSHCertutilCerts {
             $Profile = $PSBoundParameters['Profile']
         }
 
-        $config        = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "Cmdlet invoked, decoding RequestID=$RequestID" `
+            -BoundParameters $PSBoundParameters
+
         $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
@@ -76,6 +80,9 @@ function Show-PWSHCertutilCerts {
         if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
         $session = Get-CASession @sessionArgs
 
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "Retrieving BinaryCertificate for RequestID=$RequestID via certutil -view"
+
         $sb = {
             param($ReqID)
             & certutil.exe -view -restrict "RequestID=$ReqID" -out 'BinaryCertificate' csv 2>$null
@@ -84,6 +91,8 @@ function Show-PWSHCertutilCerts {
         $csvData   = ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap
 
         if (-not $csvData) {
+            Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                -ProfileName $Profile -CAServer $CAFqdn -Message "No certificate found with RequestID=$RequestID"
             Write-Error "No certificate found with RequestID $RequestID on $CAFqdn"
             return
         }
@@ -91,6 +100,8 @@ function Show-PWSHCertutilCerts {
         # BinaryCertificate in certutil CSV output is DER bytes encoded as base64
         $certRaw = $csvData.BinaryCertificate -replace '\s', ''
         $decoded = ConvertFrom-CertutilAsn1 -CertBase64 $certRaw
+        Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -CAServer $CAFqdn -Message "Decoded certificate for RequestID=$RequestID"
         $decoded | Add-ResultMetadata -Profile $Profile -CAServer $CAFqdn
     }
 }

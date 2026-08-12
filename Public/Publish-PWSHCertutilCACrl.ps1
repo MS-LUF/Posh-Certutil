@@ -44,7 +44,10 @@ function Publish-PWSHCertutilCACrl {
     process {
         $Profile = $PSBoundParameters['Profile']
 
-        $config        = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -Message 'Cmdlet invoked' -BoundParameters $PSBoundParameters
+
         $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
@@ -57,12 +60,18 @@ function Publish-PWSHCertutilCACrl {
         foreach ($ca in $cas) {
             if (-not $PSCmdlet.ShouldProcess($ca.fqdn, 'Publish CRL')) { continue }
             try {
+                Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message 'Publishing CRL via certutil -crl'
+
                 $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
                 if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
                 $session = Get-CASession @sessionArgs
 
                 $crlResult  = Invoke-CertutilCrl -Session $session
                 $crlDecoded = ConvertFrom-CertutilAsn1 -CrlBase64 $crlResult.CrlBase64
+
+                Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "Published CRL '$($crlResult.FileName)'"
 
                 [PSCustomObject]@{
                     Profile       = $Profile
@@ -74,6 +83,8 @@ function Publish-PWSHCertutilCACrl {
                     CRLDecoded    = $crlDecoded
                 }
             } catch {
+                Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "Failed to publish CRL: $_"
                 Write-Error "Failed to publish CRL on '$($ca.fqdn)': $_"
             }
         }

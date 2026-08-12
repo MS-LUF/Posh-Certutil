@@ -80,7 +80,10 @@ function Search-PWSHCertutilCerts {
     process {
         $Profile = $PSBoundParameters['Profile']
 
-        $config        = Read-ConfigFile
+        $config = Read-ConfigFile
+        Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+            -ProfileName $Profile -Message 'Cmdlet invoked' -BoundParameters $PSBoundParameters
+
         $Profile       = Resolve-ProfileName -Config $config -ProfileName $Profile
         $profileConfig = Get-ProfileConfig -Config $config -ProfileName $Profile
 
@@ -121,15 +124,24 @@ function Search-PWSHCertutilCerts {
 
         foreach ($ca in $cas) {
             try {
+                Write-PWSHCertutilLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "Searching certificates via certutil -view -restrict `"$restrict`""
+
                 $sessionArgs = @{ CAFqdn = $ca.fqdn; RemotingConfig = $profileConfig.remoting }
                 if ($PSBoundParameters.ContainsKey('Credential')) { $sessionArgs['Credential'] = $Credential }
 
                 $session   = Get-CASession @sessionArgs
                 $caCulture = Get-CACulture -Session $session
                 $rawOutput = Invoke-CertutilView -Session $session -Restrict $restrict -Out $out
-                ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap -CACulture $caCulture |
-                    Add-ResultMetadata -Profile $Profile -CAServer $ca.fqdn
+                $results   = @(ConvertFrom-CertutilCsv -RawOutput $rawOutput -FieldMap $fieldMap -CACulture $caCulture |
+                    Add-ResultMetadata -Profile $Profile -CAServer $ca.fqdn)
+
+                Write-PWSHCertutilLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "Search returned $($results.Count) certificate(s)"
+                $results
             } catch {
+                Write-PWSHCertutilLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                    -ProfileName $Profile -CAServer $ca.fqdn -Message "Failed to search certs: $_"
                 Write-Error "Failed to search certs on '$($ca.fqdn)': $_"
             }
         }

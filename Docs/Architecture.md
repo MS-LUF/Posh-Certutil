@@ -47,7 +47,7 @@ Posh-Certutil/
 │   │   └── Test-CASession.ps1           # Liveness probe
 │   ├── Certutil/
 │   │   ├── Invoke-CertutilView.ps1      # certutil -view remotely, return stdout lines
-│   │   ├── ConvertFrom-CertutilCsv.ps1  # Filter + ConvertFrom-Csv + localized column rename + CA-culture date parsing
+│   │   ├── ConvertFrom-CertutilCsv.ps1  # Filter + ConvertFrom-Csv + localized column rename + CertificateTemplate OID/DisplayName split + CA-culture date parsing
 │   │   ├── Get-CACulture.ps1            # (Get-Culture).Name run on the CA, for ConvertFrom-CertutilCsv -CACulture
 │   │   ├── Get-CALocalDate.ps1          # {Today; ExpireDate} strings in the CA's own locale/timezone
 │   │   ├── Invoke-CertutilRevoke.ps1    # certutil -revoke remotely
@@ -59,8 +59,15 @@ Posh-Certutil/
 │   │   ├── Invoke-CertreqSubmit.ps1     # certreq -submit remotely, transfer CSR bytes
 │   │   ├── Invoke-CertreqRetrieve.ps1   # certreq -retrieve remotely, return cert bytes
 │   │   └── Get-CertutilFieldNameMap.ps1 # Probe query to map localized→canonical column names
-│   └── Output/
-│       └── Add-ResultMetadata.ps1       # Stamp Profile + CAServer on each object
+│   ├── Output/
+│   │   └── Add-ResultMetadata.ps1       # Stamp Profile + CAServer on each object
+│   └── Logging/
+│       ├── Write-PWSHCertutilLog.ps1    # Central logging entry point, called by every public cmdlet
+│       ├── Get-LoggingConfig.ps1        # Read + normalize the global Logging config section
+│       ├── Resolve-LogFilePath.ps1      # Expand %ENV% + {DateFormat} tokens, ensure directory exists
+│       ├── Write-FileLogEntry.ps1       # Append one formatted line to the log file
+│       ├── Write-EventLogEntry.ps1      # Write one entry to the Windows Event Log, creating the source if needed
+│       └── Test-EventSourceExists.ps1   # [EventLog]::SourceExists() wrapper, mockable in unit tests
 ├── Docs/                                # Markdown + Mermaid documentation (this folder)
 └── Tests/                               # Pester test scripts
 ```
@@ -72,13 +79,17 @@ Posh-Certutil/
 `Posh-Certutil.psm1` contains zero business logic. It:
 
 1. Declares the module-scoped session pool (`$script:SessionPool` — a `ConcurrentDictionary`).
-2. Declares `$script:CmdletAliases`, a hashtable mapping a handful of canonical (historically
-   plural-noun) function names to a singular-noun alias
-3. Dot-sources all `Private/**/*.ps1` files recursively.
-4. Dot-sources all `Public/*.ps1` files, calls `Export-ModuleMember -Function` for each, and — when
+2. Declares `$script:LogLevelSeverity` (the Debug/Information/Warning/Error ordering used by
+   `Write-PWSHCertutilLog` to compare an entry's `Level` against the configured `MinimumLevel`) and
+   the "warn once per session" flags `$script:LoggingConfigWarned` / `$script:LoggingSinkFailed` —
+   see [Logging](#logging).
+3. Declares `$script:CmdletAliases`, a hashtable mapping a handful of canonical (historically
+   plural-noun) function names to a singular-noun alias — see [Naming convention](../CLAUDE.md#naming-convention).
+4. Dot-sources all `Private/**/*.ps1` files recursively.
+5. Dot-sources all `Public/*.ps1` files, calls `Export-ModuleMember -Function` for each, and — when
    the file's `BaseName` is a key in `$script:CmdletAliases` — registers the mapped alias via
    `New-Alias` and calls `Export-ModuleMember -Alias` for it too.
-5. Registers an `OnRemove` handler that closes all pooled WinRM sessions when the module is removed.
+6. Registers an `OnRemove` handler that closes all pooled WinRM sessions when the module is removed.
 
 The session pool is `$script:` (module-scoped), not `$global:`. It is invisible to the caller's scope.
 
@@ -142,7 +153,7 @@ flowchart TD
     G --> H[Get-CASession\npool hit or new WinRM session]
     H --> GC[Get-CACulture\nGet-Culture .Name on the CA\ne.g. en-US, fr-FR]
     GC --> I[Invoke-CertutilView\nInvoke-Command on CA\ncertutil -view -restrict R -out O csv]
-    I --> J[ConvertFrom-CertutilCsv\nfilter quoted lines → ConvertFrom-Csv\nrename localized headers → canonical names\nusing syncState.fieldNameMap\nparse NotBefore/NotAfter/RevokedEffectiveWhen\nto DateTime using the CA culture]
+    I --> J[ConvertFrom-CertutilCsv\nfilter quoted lines → ConvertFrom-Csv\nrename localized headers → canonical names\nusing syncState.fieldNameMap\nsplit CertificateTemplate → CertificateTemplateOID/DisplayName\nparse NotBefore/NotAfter/RevokedEffectiveWhen\nto DateTime using the CA culture]
     J --> K[Add-ResultMetadata\nstamp Profile + CAServer]
     K --> L[Emit to pipeline]
     L --> G
@@ -191,7 +202,11 @@ Every get/search cmdlet emits objects with this minimum shape:
 | `CAServer` | `string` | stamped by `Add-ResultMetadata` |
 | `RequestID` | `string` | certutil -out field |
 | `NotBefore`, `NotAfter`, `RevokedEffectiveWhen` | `datetime` | certutil -out field, parsed by `ConvertFrom-CertutilCsv -CACulture` (see below) |
+| `CertificateTemplate` | `string` | certutil -out field, raw `"<OID> <DisplayName>"` (or plain name for legacy V1 templates) |
+| `CertificateTemplateOID`, `CertificateTemplateDisplayName` | `string` | derived by `ConvertFrom-CertutilCsv` whenever `CertificateTemplate` is present in the row (see below); `CertificateTemplateOID` is `$null` for V1 templates |
 | *(other fields)* | `string` | certutil -out fields per profile config |
+
+`ConvertFrom-CertutilCsv` splits `CertificateTemplate` into `CertificateTemplateOID` and `CertificateTemplateDisplayName` whenever the column is present on the row, in addition to leaving the original combined `CertificateTemplate` property untouched. certutil emits this column as `"<OID> <DisplayName>"` for V2/V3 templates (the display name may itself contain spaces) or just the plain template name for legacy V1 templates (no OID). The split matches on the OID's dotted-decimal shape (`^\d+(\.\d+){4,}\s+.+$`) rather than splitting on the first space, so multi-word display names are preserved intact; when the value doesn't match that shape (V1 templates), `CertificateTemplateOID` is `$null` and the full value becomes `CertificateTemplateDisplayName`. Profiles that omit `CertificateTemplate` from a `certutilView.out` list never see any of the three properties — nothing to split.
 
 Pipeline-aware cmdlets (`Show-`, `Get-CertStatus`, `Revoke-`) extract `Profile`, `CAServer`, and `RequestID` from the piped object automatically. The caller does not re-specify these.
 
@@ -319,6 +334,51 @@ $req | Approve-PWSHCertutilPendingCert -Confirm:$false
 # 3. Requestor retrieves the issued certificate (certreq -retrieve on the CA)
 $req | Get-PWSHCertreqCert -OutputCertPath 'C:\certs\server.cer'
 ```
+
+---
+
+## Logging
+
+Every public cmdlet calls `Write-PWSHCertutilLog` (Private/Logging layer) at its entry point (Debug,
+with `$PSBoundParameters` attached) and around each per-CA operation (Information on success, Error
+on failure). Logging is global configuration (not per-profile) read from `Config.Logging` — see
+[Docs/ConfigSchema.md](ConfigSchema.md#logging) for the full field reference.
+
+```mermaid
+flowchart TD
+    A[Write-PWSHCertutilLog\nConfig, Level, Message, CmdletName\noptional ProfileName/CAServer/BoundParameters] --> B[Get-LoggingConfig\nnormalize Config.Logging\ndefault Enabled=false when absent]
+    B --> C{Enabled?}
+    C -->|No| Z[return — no-op]
+    C -->|Yes| D{Level >= MinimumLevel?}
+    D -->|No| Z
+    D -->|Yes| E[Redact Credential/Password/Secret/Token\nin BoundParameters, if supplied]
+    E --> F[Build entry: Timestamp, Level, WindowsIdentity,\nCmdletName, ProfileName, CAServer, Message]
+    F --> G{Mode}
+    G -->|File| H[Write-FileLogEntry]
+    G -->|EventLog| I[Write-EventLogEntry]
+    H --> H1[Resolve-LogFilePath\nexpand %ENV% + {DateFormat} token\ncreate directory if missing]
+    H1 --> H2[Add-Content formatted line]
+    I --> I1[Test-EventSourceExists\ncreate via New-EventLog if not]
+    I1 --> I2[Write-EventLog\nEventId/EntryType by Level\nDebug → EventIdInformation, DEBUG-prefixed message]
+```
+
+**Key design points:**
+
+- **Opt-in, never breaks configs written before this feature**: `Get-LoggingConfig` treats an absent
+  `Logging` key as `Enabled: false` and defaults every other field, so callers never null-check.
+- **Never throws.** `Write-PWSHCertutilLog`, `Write-FileLogEntry`, and `Write-EventLogEntry` each
+  wrap their work in `try/catch`; a sink failure is surfaced once per session via `Write-Warning`
+  (`$script:LoggingSinkFailed`) and silently skipped afterwards — a broken logging destination must
+  never interrupt the cmdlet's actual certutil/certreq work.
+- **Identity, not just profile/CA**: every entry carries
+  `[System.Security.Principal.WindowsIdentity]::GetCurrent().Name`, so audit trails tie back to who
+  ran the action.
+- **Secret redaction**: when a cmdlet passes `-BoundParameters $PSBoundParameters` (typically only on
+  its Debug-level entry-point log), any key matching `Credential|Password|Secret|Token` is replaced
+  with `<redacted>` before being appended to the message.
+- **Debug has no Windows Event Log equivalent**: `Write-EventLogEntry` writes Debug-level entries
+  using `EventIdInformation`/`EntryType.Information` with a `[DEBUG] ` message prefix, since Event
+  Log has no Debug entry type.
 
 ---
 
