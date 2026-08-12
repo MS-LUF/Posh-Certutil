@@ -84,7 +84,7 @@ Posh-Certutil/
    the "warn once per session" flags `$script:LoggingConfigWarned` / `$script:LoggingSinkFailed` —
    see [Logging](#logging).
 3. Declares `$script:CmdletAliases`, a hashtable mapping a handful of canonical (historically
-   plural-noun) function names to a singular-noun alias — see [Naming convention](../CLAUDE.md#naming-convention).
+   plural-noun) function names to a singular-noun alias.
 4. Dot-sources all `Private/**/*.ps1` files recursively.
 5. Dot-sources all `Public/*.ps1` files, calls `Export-ModuleMember -Function` for each, and — when
    the file's `BaseName` is a key in `$script:CmdletAliases` — registers the mapped alias via
