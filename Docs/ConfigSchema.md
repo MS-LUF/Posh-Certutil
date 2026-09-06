@@ -78,8 +78,7 @@ log, missing elevation to register a source) is caught, surfaced once per sessio
 `Write-Warning`, and silently skipped for the rest of the session — a broken logging destination
 must never interrupt the cmdlet's actual certutil/certreq work.
 
-Read via `Get-LoggingConfig`, which normalizes every key so callers never null-check — see
-[Docs/Architecture.md](Architecture.md#logging).
+Read via `Get-LoggingConfig`, which normalizes every key so callers never null-check.
 
 ---
 
@@ -163,7 +162,7 @@ Controls what certutil `-restrict` and `-out` strings are sent for each operatio
 - **These names must match the CA database schema.** Common names: `RequestID`, `RequesterName`, `CommonName`, `NotBefore`, `NotAfter`, `SerialNumber`, `CertificateTemplate`, `Disposition`, `RevokedReason`, `RevokedEffectiveWhen`, `BinaryCertificate`.
 - Field names are case-sensitive and CA-version-dependent. Validate against your CAs using `certutil -schema` on the CA.
 - Adding or removing fields here changes what properties appear on output objects immediately — no module reload required.
-- Including `CertificateTemplate` also adds two derived properties, `CertificateTemplateOID` and `CertificateTemplateDisplayName`, split out by `ConvertFrom-CertutilCsv` (see `Docs/Architecture.md#output-object-contract`). Omitting `CertificateTemplate` from `out` suppresses all three properties — there's no separate config knob for hiding just the derived ones.
+- Including `CertificateTemplate` also adds two derived properties, `CertificateTemplateOID` and `CertificateTemplateDisplayName`, split out by `ConvertFrom-CertutilCsv. Omitting `CertificateTemplate` from `out` suppresses all three properties — there's no separate config knob for hiding just the derived ones.
 
 ### `syncState`
 
@@ -191,7 +190,7 @@ Populated automatically by `Sync-PWSHCertutilCASchema -UpdateConfig` or by the f
 
 **Auto-sync behaviour:** When a query cmdlet runs and `syncState.lastSync` is absent or `null`, the module automatically opens a session to the first CA in the profile, runs a probe query (`certutil -view -restrict RequestID=0 csv`) to discover the localized headers, builds the map, and saves it to the JSON. A `Write-Warning` is emitted to make the side-effect visible. The first query takes slightly longer; all subsequent queries use the cached map.
 
-**Date-typed output columns:** The same localized-header problem applies to certutil's date/time columns (`NotBefore`, `NotAfter`, `RevokedEffectiveWhen`) — certutil writes them in the **CA server's** locale, not the admin machine's. `ConvertFrom-CertutilCsv` parses these into real `[datetime]` values using a culture name fetched per-CA via the `Get-CACulture` private helper (`(Get-Culture).Name` run on the CA itself), never the admin machine's own culture. See [Docs/Architecture.md](Architecture.md#output-object-contract) for the full contract.
+**Date-typed output columns:** The same localized-header problem applies to certutil's date/time columns (`NotBefore`, `NotAfter`, `RevokedEffectiveWhen`) — certutil writes them in the **CA server's** locale, not the admin machine's. `ConvertFrom-CertutilCsv` parses these into real `[datetime]` values using a culture name fetched per-CA via the `Get-CACulture` private helper (`(Get-Culture).Name` run on the CA itself), never the admin machine's own culture.
 
 ---
 
@@ -231,8 +230,7 @@ Set-PWSHCertutilConfig -Profile 'prod-pki' -CAFqdn 'ca01.corp.local' -DefaultPro
 
 ### Tab completion and validation on -Profile
 
-On every cmdlet except `Set-PWSHCertutilConfig`, `-Profile` is a dynamic parameter (see
-[Docs/Architecture.md](Architecture.md#the-dynamic--profile-parameter)) with a `ValidateSet` built
+On every cmdlet except `Set-PWSHCertutilConfig`, `-Profile` is a dynamic parameter with a `ValidateSet` built
 from the current profile names in this JSON file. That means:
 
 - Pressing Tab after `-Profile ` on any of those cmdlets suggests only the profiles currently defined here.

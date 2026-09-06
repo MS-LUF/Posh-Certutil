@@ -200,7 +200,6 @@ See [Docs/ConfigSchema.md](Docs/ConfigSchema.md#logging) for the full field refe
 
 | Document | Contents |
 |---|---|
-| [Docs/Architecture.md](Docs/Architecture.md) | Module structure, data pipeline, certreq workflow, session management, output object contract, error handling |
 | [Docs/ConfigSchema.md](Docs/ConfigSchema.md) | Full JSON configuration schema reference, restrict/out field rules, disposition values |
 | [Docs/SessionManagement.md](Docs/SessionManagement.md) | WinRM session pool design, liveness probe, throttling, TLS configuration |
 | [Docs/TestPlan.md](Docs/TestPlan.md) | Pester coverage matrix for every public cmdlet and private helper |
